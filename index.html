@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Incident Lens AI</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              background: '#09090b', // Zinc 950
+              surface: '#18181b',    // Zinc 900
+              surfaceHighlight: '#27272a', // Zinc 800
+              
+              primary: '#6366f1',    // Indigo 500
+              primaryHover: '#4f46e5',
+              primaryDim: 'rgba(99, 102, 241, 0.15)',
+              
+              accent: '#8b5cf6',     // Violet 500
+              
+              textPrimary: '#f4f4f5', // Zinc 100
+              textSecondary: '#a1a1aa', // Zinc 400
+              textTertiary: '#52525b',  // Zinc 600
+              
+              success: '#10b981',    // Emerald 500
+              warning: '#f59e0b',    // Amber 500
+              danger: '#f43f5e',     // Rose 500
+            },
+            fontFamily: {
+              sans: ['Inter', 'system-ui', 'sans-serif'],
+              mono: ['JetBrains Mono', 'monospace'],
+            },
+            backgroundImage: {
+              'gradient-primary': 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
+              'grid-pattern': "linear-gradient(to right, #27272a 1px, transparent 1px), linear-gradient(to bottom, #27272a 1px, transparent 1px)",
+            },
+            boxShadow: {
+              'glow-primary': '0 0 20px rgba(99, 102, 241, 0.25)',
+              'glow-danger': '0 0 20px rgba(244, 63, 94, 0.3)',
+              'panel': '0 8px 32px rgba(0, 0, 0, 0.4)',
+            },
+            animation: {
+              'scan': 'scan 3s linear infinite',
+              'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+              'fade-in': 'fadeIn 0.5s ease-out forwards',
+            },
+            keyframes: {
+              scan: {
+                '0%': { top: '0%', opacity: '0' },
+                '10%': { opacity: '1' },
+                '90%': { opacity: '1' },
+                '100%': { top: '100%', opacity: '0' },
+              },
+              fadeIn: {
+                '0%': { opacity: '0', transform: 'translateY(10px)' },
+                '100%': { opacity: '1', transform: 'translateY(0)' },
+              }
+            }
+          },
+        },
+      }
+    </script>
+    <style>
+      body {
+        background-color: #09090b;
+        color: #f4f4f5;
+      }
+      /* Custom Scrollbar */
+      ::-webkit-scrollbar {
+        width: 5px;
+        height: 5px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent; 
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #3f3f46; 
+        border-radius: 4px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #6366f1; 
+      }
+      
+      .glass {
+        background: rgba(24, 24, 27, 0.7);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+      }
+      
+      .custom-range::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        height: 12px;
+        width: 12px;
+        border-radius: 50%;
+        background: #f4f4f5;
+        cursor: pointer;
+        margin-top: -4px;
+      }
+      .custom-range::-webkit-slider-runnable-track {
+        width: 100%;
+        height: 4px;
+        cursor: pointer;
+        background: #3f3f46;
+        border-radius: 2px;
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@^19.2.3",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "recharts": "https://esm.sh/recharts@^3.6.0",
+    "@google/genai": "https://esm.sh/@google/genai@^1.34.0",
+    "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
+    "jspdf": "https://esm.sh/jspdf@2.5.1"
+  }
+}
+</script>
+</head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
