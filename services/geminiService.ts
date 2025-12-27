@@ -315,7 +315,15 @@ export const searchSimilarCases = async (query: string): Promise<{ text: string;
 
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
-    contents: `Find recent legal precedents, traffic statutes, case law, or weather reports relevant to: ${query}. Summarize the findings clearly for a forensic report.`,
+    contents: `
+      Research Task: Find relevant legal precedents, case law, or vehicle code statutes regarding: "${query}".
+      
+      Instructions:
+      1. Structure the response clearly with Markdown headers (###).
+      2. List specific cases or statutes as bullet points.
+      3. For each item, provide the Case Name/Statute Code in **bold**, followed by a concise summary of the ruling or rule.
+      4. Focus on liability and fault determination principles.
+    `,
     config: {
       tools: [{ googleSearch: {} }],
     },

@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
   <head>
@@ -6,59 +7,62 @@
     <title>Incident Lens AI</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
         theme: {
           extend: {
             colors: {
-              background: '#09090b', // Zinc 950
-              surface: '#18181b',    // Zinc 900
-              surfaceHighlight: '#27272a', // Zinc 800
+              background: '#f8fafc', // Slate 50
+              surface: '#ffffff',    // White
+              surfaceHighlight: '#f1f5f9', // Slate 100
               
-              primary: '#6366f1',    // Indigo 500
-              primaryHover: '#4f46e5',
-              primaryDim: 'rgba(99, 102, 241, 0.15)',
+              primary: '#4f46e5',    // Indigo 600
+              primaryHover: '#4338ca', // Indigo 700
+              primaryLight: '#e0e7ff', // Indigo 100
               
-              accent: '#8b5cf6',     // Violet 500
+              textPrimary: '#1e293b', // Slate 800 - High contrast
+              textSecondary: '#64748b', // Slate 500 - Medium contrast
+              textTertiary: '#94a3b8',  // Slate 400 - Low contrast
               
-              textPrimary: '#f4f4f5', // Zinc 100
-              textSecondary: '#a1a1aa', // Zinc 400
-              textTertiary: '#52525b',  // Zinc 600
+              border: '#e2e8f0',     // Slate 200
+              borderStrong: '#cbd5e1', // Slate 300
               
               success: '#10b981',    // Emerald 500
               warning: '#f59e0b',    // Amber 500
-              danger: '#f43f5e',     // Rose 500
+              danger: '#ef4444',     // Red 500
             },
             fontFamily: {
               sans: ['Inter', 'system-ui', 'sans-serif'],
               mono: ['JetBrains Mono', 'monospace'],
             },
             backgroundImage: {
-              'gradient-primary': 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
-              'grid-pattern': "linear-gradient(to right, #27272a 1px, transparent 1px), linear-gradient(to bottom, #27272a 1px, transparent 1px)",
+              'grid-pattern': "linear-gradient(to right, #f1f5f9 1px, transparent 1px), linear-gradient(to bottom, #f1f5f9 1px, transparent 1px)",
             },
             boxShadow: {
-              'glow-primary': '0 0 20px rgba(99, 102, 241, 0.25)',
-              'glow-danger': '0 0 20px rgba(244, 63, 94, 0.3)',
-              'panel': '0 8px 32px rgba(0, 0, 0, 0.4)',
+              'soft': '0 2px 8px -2px rgba(0, 0, 0, 0.05), 0 1px 4px -1px rgba(0, 0, 0, 0.02)',
+              'card': '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)',
+              'panel': '0 0 40px -10px rgba(0, 0, 0, 0.05)',
+              'glow': '0 0 20px rgba(79, 70, 229, 0.15)',
             },
             animation: {
-              'scan': 'scan 3s linear infinite',
               'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
-              'fade-in': 'fadeIn 0.5s ease-out forwards',
+              'fade-in': 'fadeIn 0.3s ease-out forwards',
+              'slide-up': 'slideUp 0.4s ease-out forwards',
             },
             keyframes: {
-              scan: {
-                '0%': { top: '0%', opacity: '0' },
-                '10%': { opacity: '1' },
-                '90%': { opacity: '1' },
-                '100%': { top: '100%', opacity: '0' },
-              },
               fadeIn: {
+                '0%': { opacity: '0' },
+                '100%': { opacity: '1' },
+              },
+              slideUp: {
                 '0%': { opacity: '0', transform: 'translateY(10px)' },
                 '100%': { opacity: '1', transform: 'translateY(0)' },
+              },
+              scan: {
+                '0%': { top: '-10%' },
+                '100%': { top: '110%' },
               }
             }
           },
@@ -67,46 +71,53 @@
     </script>
     <style>
       body {
-        background-color: #09090b;
-        color: #f4f4f5;
+        background-color: #f8fafc;
+        color: #1e293b;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
       }
-      /* Custom Scrollbar */
+      /* Professional Scrollbar */
       ::-webkit-scrollbar {
-        width: 5px;
-        height: 5px;
+        width: 6px;
+        height: 6px;
       }
       ::-webkit-scrollbar-track {
         background: transparent; 
       }
       ::-webkit-scrollbar-thumb {
-        background: #3f3f46; 
-        border-radius: 4px;
+        background: #cbd5e1; 
+        border-radius: 999px;
       }
       ::-webkit-scrollbar-thumb:hover {
-        background: #6366f1; 
+        background: #94a3b8; 
       }
       
       .glass {
-        background: rgba(24, 24, 27, 0.7);
-        backdrop-filter: blur(8px);
-        -webkit-backdrop-filter: blur(8px);
-        border: 1px solid rgba(255, 255, 255, 0.05);
+        background: rgba(255, 255, 255, 0.9);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border-bottom: 1px solid #e2e8f0;
       }
       
       .custom-range::-webkit-slider-thumb {
         -webkit-appearance: none;
-        height: 12px;
-        width: 12px;
+        height: 14px;
+        width: 14px;
         border-radius: 50%;
-        background: #f4f4f5;
+        background: #4f46e5;
         cursor: pointer;
-        margin-top: -4px;
+        margin-top: -5px;
+        box-shadow: 0 2px 4px rgba(79, 70, 229, 0.3);
+        transition: transform 0.1s;
+      }
+      .custom-range::-webkit-slider-thumb:hover {
+        transform: scale(1.1);
       }
       .custom-range::-webkit-slider-runnable-track {
         width: 100%;
         height: 4px;
         cursor: pointer;
-        background: #3f3f46;
+        background: #e2e8f0;
         border-radius: 2px;
       }
     </style>

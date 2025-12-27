@@ -1,10 +1,10 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { jsPDF } from "jspdf";
 import { IncidentAnalysis, ConfidenceLevel, Entity, RoiAnalysis, VideoSource } from '../types';
 import { RiskRadarChart, FaultChart } from './AnalysisCharts';
 import { evaluateCounterfactual, searchSimilarCases, analyzeRegionOfInterest, generateReport } from '../services/geminiService';
-import { FileText, Activity, Scale, Truck, Clock, Video, Zap, PlayCircle, Layers, GitPullRequest, Loader2, Minimize2, ZoomIn, RotateCcw, PenTool, MousePointer2, Settings, AlertTriangle, List, Search, ChevronRight, ChevronLeft, Pause, Play, Scan, Crosshair, X, Terminal, ShieldCheck, CheckCircle2, HelpCircle, AlertOctagon, Ruler, Calculator, Gavel, MonitorPlay, Speaker, Waves, Sparkles, Sun, Cloud, Thermometer, Signpost, Grip, Wind, Camera, Aperture, User, Eye, Smartphone, UserX, Share2, Circle, Signal, Car, Droplets, Construction, EyeOff, TreeDeciduous, Lock, FileCheck, Database, Hammer, ShieldAlert, BookOpen } from 'lucide-react';
+import { FileText, Activity, Scale, Truck, Clock, Video, Zap, PlayCircle, Layers, GitPullRequest, Loader2, Minimize2, ZoomIn, RotateCcw, PenTool, MousePointer2, Settings, AlertTriangle, List, Search, ChevronRight, ChevronLeft, Pause, Play, Scan, Crosshair, X, Terminal, ShieldCheck, CheckCircle2, HelpCircle, AlertOctagon, Ruler, Calculator, Gavel, MonitorPlay, Speaker, Waves, Sparkles, Sun, Cloud, Thermometer, Signpost, Grip, Wind, Camera, Aperture, User, Eye, Smartphone, UserX, Share2, Circle, Signal, Car, Droplets, Construction, EyeOff, TreeDeciduous, Lock, FileCheck, Database, Hammer, ShieldAlert, BookOpen, PanelRightClose, PanelRightOpen, GripVertical, Rewind, FastForward, Globe, Library, FileDown, MoreHorizontal, Download, Printer, FileType, FileWarning, MapPin, Scale as ScaleIcon, LucideIcon, MessageSquare } from 'lucide-react';
 
 interface AnalysisDashboardProps {
   analysis: IncidentAnalysis | null;
@@ -15,89 +15,173 @@ interface AnalysisDashboardProps {
 
 // --- SHARED UI PRIMITIVES ---
 
+const ensureArray = (data: any): any[] => {
+    return Array.isArray(data) ? data : [];
+};
+
+const EmptyAnalysisState: React.FC<{ title: string; icon: any; message?: string }> = ({ title, icon: Icon, message }) => (
+    <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-center p-8 animate-fade-in border-2 border-dashed border-slate-200 rounded-xl bg-slate-50">
+        <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center mb-4 border border-slate-200 shadow-sm">
+            <Icon size={24} className="text-slate-400" />
+        </div>
+        <h3 className="text-sm font-bold text-textPrimary uppercase tracking-wide mb-2 font-mono">{title} UNAVAILABLE</h3>
+        <p className="text-xs text-textSecondary max-w-xs leading-relaxed">
+            {message || "The AI analysis did not generate specific data for this category based on the provided footage."}
+        </p>
+    </div>
+);
+
 const ConfidenceBadge: React.FC<{ level?: ConfidenceLevel }> = ({ level = 'Insufficient' }) => {
   const styles = {
-    'High': 'text-emerald-400 border-emerald-400/30 bg-emerald-400/10',
-    'Moderate': 'text-amber-400 border-amber-400/30 bg-amber-400/10',
-    'Low': 'text-danger border-danger/30 bg-danger/10',
-    'Insufficient': 'text-gray-500 border-gray-500/30 bg-gray-500/10'
+    'High': 'text-emerald-700 bg-emerald-50 border-emerald-200 ring-1 ring-emerald-100',
+    'Moderate': 'text-amber-700 bg-amber-50 border-amber-200 ring-1 ring-amber-100',
+    'Low': 'text-rose-700 bg-rose-50 border-rose-200 ring-1 ring-rose-100',
+    'Insufficient': 'text-slate-500 bg-slate-50 border-slate-200'
   }[level];
 
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[9px] font-mono font-bold uppercase tracking-wider border ${styles}`}>
-      {level === 'High' && <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_5px_rgba(52,211,153,0.5)]" />}
-      {level === 'Moderate' && <div className="w-1.5 h-1.5 rounded-full bg-amber-400" />}
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${styles} shadow-sm`}>
+      {level === 'High' && <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />}
+      {level === 'Moderate' && <div className="w-1.5 h-1.5 rounded-full bg-amber-500" />}
       {level === 'Low' && <div className="w-1.5 h-1.5 rounded-full bg-rose-500" />}
-      {level === 'Insufficient' && <div className="w-1.5 h-1.5 rounded-full bg-gray-500" />}
+      {level === 'Insufficient' && <div className="w-1.5 h-1.5 rounded-full bg-slate-400" />}
       {level} Conf.
     </span>
   );
 };
 
-const TextWithTimestamps: React.FC<{ text: string; onSeek: (t: number) => void }> = ({ text, onSeek }) => {
+// --- ADVANCED TEXT RENDERERS ---
+
+const InlineText: React.FC<{ text: string; onSeek?: (t: number) => void }> = ({ text, onSeek }) => {
   if (!text) return null;
-  // Regex to capture bold text (**text**) OR timestamps ([MM:SS] or [MM:SS.ms])
-  const parts = text.split(/(\*\*.*?\*\*|\[\d{1,2}:\d{2}(?:\.\d+)?\])/g);
+  // Regex for **bold**, `code`, and [timestamp]
+  const parts = text.split(/(\*\*.*?\*\*|`.*?`|\[\d{1,2}:\d{2}(?:\.\d+)?\])/g);
   
   return (
     <span>
       {parts.map((part, i) => {
-        // Check for timestamp
+        if (part.startsWith('**') && part.endsWith('**')) {
+            return <span key={i} className="font-bold text-textPrimary">{part.slice(2, -2)}</span>;
+        }
+        if (part.startsWith('`') && part.endsWith('`')) {
+            return <code key={i} className="bg-slate-100 border border-slate-200 rounded px-1 text-[0.9em] font-mono text-rose-600">{part.slice(1, -1)}</code>;
+        }
         const tsMatch = part.match(/^\[(\d{1,2}):(\d{2})(?:\.(\d+))?\]$/);
         if (tsMatch) {
            const seconds = parseInt(tsMatch[1]) * 60 + parseInt(tsMatch[2]) + (tsMatch[3] ? parseFloat(`0.${tsMatch[3]}`) : 0);
            return (
-            <button key={i} onClick={(e) => { e.stopPropagation(); onSeek(seconds); }}
-              className="text-primary hover:text-white hover:underline cursor-pointer font-mono font-bold mx-0.5 transition-colors bg-primary/10 px-1 rounded border border-primary/20 text-[0.9em] align-baseline"
+            <button key={i} onClick={(e) => { e.stopPropagation(); onSeek?.(seconds); }}
+              className="inline-flex items-center gap-1 text-primary hover:text-white hover:bg-primary cursor-pointer font-mono font-bold mx-0.5 px-1.5 py-0 rounded transition-colors text-[0.85em] bg-primaryLight/40 border border-primary/10 align-baseline select-none"
               title={`Jump to ${part}`}
             >
-              {part}
+              <Clock size={10} className="inline opacity-70"/> {part}
             </button>
           );
         }
-        // Check for bold
-        if (part.startsWith('**') && part.endsWith('**')) {
-            return <span key={i} className="font-bold text-white">{part.slice(2, -2)}</span>;
-        }
-        // Plain text
-        return <span key={i} className="text-inherit">{part}</span>;
+        return <span key={i}>{part}</span>;
       })}
     </span>
   );
 };
 
+const FormattedMarkdown: React.FC<{ text: string; onSeek?: (t: number) => void; className?: string }> = ({ text, onSeek, className = "" }) => {
+  if (!text) return null;
+  const lines = text.split('\n');
+  
+  return (
+    <div className={`space-y-3 font-sans text-xs ${className}`}>
+      {lines.map((line, i) => {
+        const trimmed = line.trim();
+        if (!trimmed) return <div key={i} className="h-1" />; 
+        
+        // Headers (### or ##)
+        if (trimmed.startsWith('#')) {
+            const level = trimmed.match(/^#+/)?.[0].length || 0;
+            const content = trimmed.replace(/^#+\s*/, '');
+            const style = level === 1 
+                ? 'text-sm font-bold text-textPrimary uppercase tracking-widest border-b border-border pb-2 mt-6 mb-3' 
+                : 'text-xs font-bold text-primary uppercase tracking-wider mt-4 mb-2 flex items-center gap-2';
+            
+            return (
+                <div key={i} className={style}>
+                    {level > 1 && <div className="w-1 h-3 bg-primary rounded-full shrink-0"></div>}
+                    {content}
+                </div>
+            );
+        }
+        
+        // List items
+        if (trimmed.match(/^[-*]\s/)) {
+            const content = trimmed.replace(/^[-*]\s+/, '');
+            return (
+                <div key={i} className="flex items-start gap-3 pl-2 group">
+                    <div className="w-1.5 h-1.5 rounded-full bg-primary/40 mt-1.5 shrink-0 group-hover:bg-primary transition-colors" />
+                    <p className="text-textSecondary leading-relaxed">
+                        <InlineText text={content} onSeek={onSeek} />
+                    </p>
+                </div>
+            );
+        }
+
+        // Numbered lists
+        if (trimmed.match(/^\d+\.\s/)) {
+             const [num, ...rest] = trimmed.split('.');
+             const content = rest.join('.').trim();
+             return (
+                <div key={i} className="flex items-start gap-3 pl-2 group">
+                    <span className="font-mono font-bold text-primary/70 mt-0.5 shrink-0">{num}.</span>
+                    <p className="text-textSecondary leading-relaxed">
+                        <InlineText text={content} onSeek={onSeek} />
+                    </p>
+                </div>
+             );
+        }
+        
+        // Standard Paragraph
+        return (
+            <p key={i} className="text-textSecondary leading-relaxed">
+                <InlineText text={trimmed} onSeek={onSeek} />
+            </p>
+        );
+      })}
+    </div>
+  );
+};
+
 const ReasoningLogRenderer: React.FC<{ text: string; onSeek: (t: number) => void }> = ({ text, onSeek }) => {
-  // Hide JSON block for the log view if present at the end
-  const displayText = text.replace(/```json[\s\S]*$/, '').replace(/```json[\s\S]*```/, '').trim();
+  const displayText = text.replace(/```json[\s\S]*$/, '').replace(/```json[\s\S]*```/, '').replace(/<<<JSON_START>>>[\s\S]*?<<<JSON_END>>>/, '').trim();
   const lines = displayText.split('\n');
 
   return (
-    <div className="font-mono text-xs leading-relaxed space-y-1">
+    <div className="font-mono text-xs leading-relaxed space-y-2 text-textSecondary">
       {lines.map((line, i) => {
         const trimmed = line.trim();
         if (trimmed.startsWith('###')) {
-           // Phase Header
            return (
-             <div key={i} className="mt-8 mb-3 flex items-center gap-3 text-cyan-400 border-b border-cyan-900/50 pb-2">
-                <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-pulse shadow-[0_0_10px_rgba(34,211,238,0.5)]"/>
-                <span className="font-bold tracking-[0.2em] uppercase">{trimmed.replace(/#/g, '').trim()}</span>
+             <div key={i} className="mt-6 mb-3 flex items-center gap-3 text-primary border-b border-border pb-2">
+                <div className="w-1.5 h-1.5 bg-primary rounded-full"/>
+                <span className="font-bold tracking-wider uppercase text-textPrimary">{trimmed.replace(/#/g, '').trim()}</span>
              </div>
            );
         }
         if (trimmed.startsWith('-')) {
-            // Bullet point
             return (
-                <div key={i} className="pl-4 flex gap-2">
-                    <span className="text-gray-600">•</span>
-                    <div className="text-gray-300"><TextWithTimestamps text={trimmed.substring(1).trim()} onSeek={onSeek} /></div>
+                <div key={i} className="pl-4 flex gap-2 border-l-2 border-border ml-1 hover:border-primary/30 transition-colors group">
+                    <div className="text-textSecondary group-hover:text-textPrimary transition-colors">
+                        <InlineText text={trimmed.substring(1).trim()} onSeek={onSeek} />
+                    </div>
                 </div>
             )
         }
         if (trimmed === '') return <div key={i} className="h-2"></div>;
         
-        return <div key={i} className="text-gray-400 pl-0"><TextWithTimestamps text={line} onSeek={onSeek} /></div>;
+        return (
+            <div key={i} className="text-textSecondary pl-0">
+                <InlineText text={line} onSeek={onSeek} />
+            </div>
+        );
       })}
-      <div className="h-4 w-2 bg-primary/50 animate-pulse inline-block mt-2"/>
+      <div className="h-4 w-2 bg-primary animate-pulse inline-block mt-2"/>
     </div>
   );
 };
@@ -106,44 +190,51 @@ const ReasoningLogRenderer: React.FC<{ text: string; onSeek: (t: number) => void
 
 const TimelineTrack: React.FC<{ duration: number; currentTime: number; onSeek: (t: number) => void; events: any[] }> = ({ duration, currentTime, onSeek, events }) => {
     return (
-        <div className="relative h-14 w-full bg-[#0c0c10] border-t border-white/5 flex items-center px-4 select-none">
+        <div className="relative h-16 w-full bg-background border-t border-border flex items-center px-4 select-none">
             {/* Ticks */}
-            <div className="absolute inset-0 pointer-events-none flex justify-between px-4 opacity-20">
-                {Array.from({ length: 11 }).map((_, i) => (
-                    <div key={i} className="h-full w-px bg-white/20 relative">
-                        <span className="absolute bottom-1 left-1 text-[8px] font-mono text-gray-500">{Math.round((duration/10)*i)}s</span>
+            <div className="absolute inset-0 pointer-events-none flex justify-between px-4 opacity-40">
+                {Array.from({ length: 21 }).map((_, i) => (
+                    <div key={i} className={`h-full w-px relative ${i % 2 === 0 ? 'bg-borderStrong h-3/4 mt-2' : 'bg-border h-1/2 mt-4'}`}>
+                        {i % 2 === 0 && <span className="absolute bottom-1 left-1 text-[9px] font-mono text-textTertiary font-bold">{Math.round((duration/20)*i)}s</span>}
                     </div>
                 ))}
             </div>
 
-            {/* Scrubber */}
+            {/* Scrubber Area */}
             <div 
-                className="relative w-full h-2 bg-white/5 rounded-full cursor-pointer group"
+                className="relative w-full h-8 cursor-pointer group z-10"
                 onClick={(e) => {
                     const rect = e.currentTarget.getBoundingClientRect();
                     onSeek(((e.clientX - rect.left) / rect.width) * duration);
                 }}
             >
+                {/* Track Line */}
+                <div className="absolute top-1/2 -translate-y-1/2 left-0 right-0 h-1.5 bg-border rounded-full group-hover:bg-borderStrong transition-colors overflow-hidden">
+                    <div className="absolute top-0 left-0 bottom-0 bg-primary" style={{ width: `${(currentTime/duration)*100}%` }}></div>
+                </div>
+                
                 {/* Event Markers */}
-                {events.map((evt, i) => {
+                {ensureArray(events).map((evt, i) => {
                      const match = evt.timestamp.match(/(\d{1,2}):(\d{2})(?:\.(\d+))?/);
                      if (!match) return null;
                      const sec = parseInt(match[1]) * 60 + parseInt(match[2]) + (match[3] ? parseFloat(`0.${match[3]}`) : 0);
                      const pct = (sec / duration) * 100;
                      return (
                          <div key={i} 
-                            className={`absolute top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full ${evt.type === 'impact' ? 'bg-danger shadow-[0_0_8px_rgba(244,63,94,0.8)] z-20 scale-125' : 'bg-primary/50 z-10 hover:bg-white'} transition-colors`} 
-                            style={{ left: `${pct}%` }}
+                            className={`absolute top-1/2 -translate-y-1/2 w-3 h-3 rotate-45 border-2 border-white shadow-sm ${evt.type === 'impact' ? 'bg-danger z-20 scale-125' : 'bg-primary z-10 hover:bg-primaryHover'} transition-all cursor-help`} 
+                            style={{ left: `${pct}%`, marginTop: '-3px' }}
                             title={evt.description}
                          />
                      );
                 })}
 
-                {/* Progress */}
-                <div className="absolute top-0 left-0 bottom-0 bg-primary/40 rounded-full pointer-events-none" style={{ width: `${(currentTime/duration)*100}%` }}></div>
-                
                 {/* Playhead */}
-                <div className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow-[0_0_10px_rgba(255,255,255,0.5)] z-30 pointer-events-none transition-transform duration-75" style={{ left: `${(currentTime/duration)*100}%`, transform: 'translate(-50%, -50%)' }}></div>
+                <div 
+                    className="absolute top-1/2 -translate-y-1/2 w-0.5 h-12 bg-danger z-30 pointer-events-none transition-transform duration-75 shadow-sm" 
+                    style={{ left: `${(currentTime/duration)*100}%` }}
+                >
+                    <div className="absolute -top-1.5 -left-2 w-4 h-4 bg-danger rounded-full border-2 border-white shadow-md"></div>
+                </div>
             </div>
         </div>
     );
@@ -152,18 +243,24 @@ const TimelineTrack: React.FC<{ duration: number; currentTime: number; onSeek: (
 // --- MAIN DASHBOARD ---
 
 export const AnalysisDashboard: React.FC<AnalysisDashboardProps> = ({ analysis, streamingLog = "", judgeMode, videoSources }) => {
-  const [activeTab, setActiveTab] = useState<'log' | 'authenticity' | 'narrative' | 'scene' | 'damage' | 'hazards' | 'signals' | 'entities' | 'vehicles' | 'occupants' | 'debris' | 'physics' | 'sim' | 'liability' | 'synthesis' | 'audio' | 'reflections' | 'shadows'>('log');
+  const [activeTab, setActiveTab] = useState<'log' | 'reports' | 'chat' | 'authenticity' | 'narrative' | 'scene' | 'damage' | 'hazards' | 'signals' | 'entities' | 'vehicles' | 'occupants' | 'debris' | 'physics' | 'sim' | 'liability' | 'synthesis' | 'audio' | 'reflections' | 'shadows' | 'fleet'>('log');
   const [activeSourceIdx, setActiveSourceIdx] = useState(0);
   const [videoDuration, setVideoDuration] = useState(1);
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const videoRef = useRef<HTMLVideoElement>(null);
   
+  // Resizing State
+  const [rightPanelWidth, setRightPanelWidth] = useState(550);
+  const [isResizing, setIsResizing] = useState(false);
+  const [isPanelCollapsed, setIsPanelCollapsed] = useState(false);
+
   // Tools
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [contrast, setContrast] = useState(100);
-  const [toolMode, setToolMode] = useState<'view' | 'draw' | 'scan'>('view');
+  const [toolMode, setToolMode] = useState<'view' | 'draw' | 'scan' | 'measure' | 'calibrate'>('view');
   
   // Drawing & Annotation
   const [isPanning, setIsPanning] = useState(false);
@@ -171,6 +268,13 @@ export const AnalysisDashboard: React.FC<AnalysisDashboardProps> = ({ analysis, 
   const [currentPath, setCurrentPath] = useState<{x:number, y:number}[]>([]);
   const [annotationColor, setAnnotationColor] = useState('#ef4444');
   
+  // Photogrammetry / Measurement State
+  const [calibrationLine, setCalibrationLine] = useState<{start: {x:number, y:number}, end: {x:number, y:number}, distance: number} | null>(null);
+  const [measurements, setMeasurements] = useState<{start: {x:number, y:number}, end: {x:number, y:number}, pxLen: number, realLen: number}[]>([]);
+  const [tempMeasureStart, setTempMeasureStart] = useState<{x:number, y:number} | null>(null);
+  const [tempMeasureCurrent, setTempMeasureCurrent] = useState<{x:number, y:number} | null>(null);
+  const [calibrationFactor, setCalibrationFactor] = useState<number | null>(null); // px per meter
+
   // Scan / ROI
   const [roiSelection, setRoiSelection] = useState<{start: {x:number, y:number}, end: {x:number, y:number}} | null>(null);
   const [isSelectingRoi, setIsSelectingRoi] = useState(false);
@@ -180,11 +284,12 @@ export const AnalysisDashboard: React.FC<AnalysisDashboardProps> = ({ analysis, 
   const [roiResult, setRoiResult] = useState<RoiAnalysis | null>(null);
   const [isRoiAnalyzing, setIsRoiAnalyzing] = useState(false);
 
+  // Report Generation State
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  const [reportProgress, setReportProgress] = useState('');
+
   // Confidence Audit
   const [confidenceModalOpen, setConfidenceModalOpen] = useState(false);
-
-  // Reporting State
-  const [generatingReport, setGeneratingReport] = useState<string | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const isDrawing = useRef(false);
@@ -195,11 +300,19 @@ export const AnalysisDashboard: React.FC<AnalysisDashboardProps> = ({ analysis, 
   const [customQuery, setCustomQuery] = useState('');
   const [simResult, setSimResult] = useState<string | null>(null);
   const [isSimulating, setIsSimulating] = useState(false);
+  
+  // Legal
   const [legalQuery, setLegalQuery] = useState('');
   const [legalResult, setLegalResult] = useState<{text: string, chunks: any[]} | null>(null);
   const [isSearching, setIsSearching] = useState(false);
 
+  // Chat
+  const [chatInput, setChatInput] = useState('');
+  const [chatHistory, setChatHistory] = useState<{role: 'user' | 'ai', text: string}[]>([]);
+  const [isChatting, setIsChatting] = useState(false);
+
   const logRef = useRef<HTMLDivElement>(null);
+  const chatRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll log
   useEffect(() => {
@@ -207,6 +320,43 @@ export const AnalysisDashboard: React.FC<AnalysisDashboardProps> = ({ analysis, 
         logRef.current.scrollTop = logRef.current.scrollHeight;
     }
   }, [streamingLog, analysis, activeTab]);
+
+  // Auto-scroll chat
+  useEffect(() => {
+    if (activeTab === 'chat' && chatRef.current) {
+        chatRef.current.scrollTop = chatRef.current.scrollHeight;
+    }
+  }, [chatHistory, activeTab]);
+
+  // --- RESIZE LOGIC ---
+  const startResizing = useCallback(() => {
+    setIsResizing(true);
+  }, []);
+
+  const stopResizing = useCallback(() => {
+    setIsResizing(false);
+  }, []);
+
+  const resize = useCallback(
+    (mouseMoveEvent: MouseEvent) => {
+      if (isResizing) {
+        const newWidth = document.body.clientWidth - mouseMoveEvent.clientX;
+        if (newWidth > 350 && newWidth < document.body.clientWidth * 0.7) {
+            setRightPanelWidth(newWidth);
+        }
+      }
+    },
+    [isResizing]
+  );
+
+  useEffect(() => {
+    window.addEventListener("mousemove", resize);
+    window.addEventListener("mouseup", stopResizing);
+    return () => {
+      window.removeEventListener("mousemove", resize);
+      window.removeEventListener("mouseup", stopResizing);
+    };
+  }, [resize, stopResizing]);
 
   // Video loop for Canvas sync
   useEffect(() => {
@@ -222,6 +372,13 @@ export const AnalysisDashboard: React.FC<AnalysisDashboardProps> = ({ analysis, 
       return () => cancelAnimationFrame(animId);
   }, []);
 
+  // Sync Playback Speed
+  useEffect(() => {
+      if (videoRef.current) {
+          videoRef.current.playbackRate = playbackSpeed;
+      }
+  }, [playbackSpeed]);
+
   // Canvas Logic
   const getCoords = (e: React.MouseEvent) => {
       const c = canvasRef.current;
@@ -233,23 +390,29 @@ export const AnalysisDashboard: React.FC<AnalysisDashboardProps> = ({ analysis, 
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
+      const coords = getCoords(e);
       if (toolMode === 'draw') {
         isDrawing.current = true;
-        setCurrentPath([getCoords(e)]);
+        setCurrentPath([coords]);
       } else if (toolMode === 'scan') {
         setIsSelectingRoi(true);
-        const coords = getCoords(e);
         setRoiSelection({ start: coords, end: coords });
+      } else if (toolMode === 'calibrate' || toolMode === 'measure') {
+          setTempMeasureStart(coords);
+          setTempMeasureCurrent(coords);
       } else if (zoom > 1) {
         setIsPanning(true);
       }
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
+      const coords = getCoords(e);
       if (toolMode === 'draw' && isDrawing.current) {
-          setCurrentPath(p => [...p, getCoords(e)]);
+          setCurrentPath(p => [...p, coords]);
       } else if (toolMode === 'scan' && isSelectingRoi && roiSelection) {
-          setRoiSelection(prev => ({ ...prev!, end: getCoords(e) }));
+          setRoiSelection(prev => ({ ...prev!, end: coords }));
+      } else if ((toolMode === 'calibrate' || toolMode === 'measure') && tempMeasureStart) {
+          setTempMeasureCurrent(coords);
       } else if (isPanning && zoom > 1) {
           setPan(p => ({ x: p.x + e.movementX/zoom, y: p.y + e.movementY/zoom })); 
       }
@@ -262,30 +425,49 @@ export const AnalysisDashboard: React.FC<AnalysisDashboardProps> = ({ analysis, 
           isDrawing.current = false;
       } else if (toolMode === 'scan' && isSelectingRoi && roiSelection) {
           setIsSelectingRoi(false);
-          // Capture Crop
           captureRoi();
-          setToolMode('view'); // Exit scan mode after capture
+          setToolMode('view');
+      } else if (toolMode === 'calibrate' && tempMeasureStart && tempMeasureCurrent) {
+          const pxDist = Math.hypot(tempMeasureCurrent.x - tempMeasureStart.x, tempMeasureCurrent.y - tempMeasureStart.y);
+          if (pxDist > 5) {
+              const realDist = parseFloat(prompt("Enter real world distance for this line (meters):", "1.0") || "0");
+              if (realDist > 0) {
+                  setCalibrationLine({ start: tempMeasureStart, end: tempMeasureCurrent, distance: realDist });
+                  setCalibrationFactor(pxDist / realDist);
+              }
+          }
+          setTempMeasureStart(null);
+          setTempMeasureCurrent(null);
+          setToolMode('measure'); // Auto switch to measure
+      } else if (toolMode === 'measure' && tempMeasureStart && tempMeasureCurrent && calibrationFactor) {
+          const pxDist = Math.hypot(tempMeasureCurrent.x - tempMeasureStart.x, tempMeasureCurrent.y - tempMeasureStart.y);
+          if (pxDist > 5) {
+              setMeasurements(p => [...p, { 
+                  start: tempMeasureStart, 
+                  end: tempMeasureCurrent, 
+                  pxLen: pxDist, 
+                  realLen: pxDist / calibrationFactor 
+              }]);
+          }
+          setTempMeasureStart(null);
+          setTempMeasureCurrent(null);
       }
       setIsPanning(false);
   };
 
   const captureRoi = () => {
       if (!canvasRef.current || !videoRef.current || !roiSelection) return;
-      
       const video = videoRef.current;
       const scaleX = video.videoWidth / canvasRef.current.width;
       const scaleY = video.videoHeight / canvasRef.current.height;
-
       const x = Math.min(roiSelection.start.x, roiSelection.end.x) * scaleX;
       const y = Math.min(roiSelection.start.y, roiSelection.end.y) * scaleY;
       const w = Math.abs(roiSelection.end.x - roiSelection.start.x) * scaleX;
       const h = Math.abs(roiSelection.end.y - roiSelection.start.y) * scaleY;
 
-      if (w < 10 || h < 10) return; // Ignore tiny clicks
-
+      if (w < 10 || h < 10) return;
       const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = w;
-      tempCanvas.height = h;
+      tempCanvas.width = w; tempCanvas.height = h;
       const ctx = tempCanvas.getContext('2d');
       if (ctx) {
           ctx.filter = `contrast(${contrast}%)`;
@@ -313,36 +495,51 @@ export const AnalysisDashboard: React.FC<AnalysisDashboardProps> = ({ analysis, 
       annotations.forEach(a => draw(a.points, a.color));
       if (toolMode === 'draw' && currentPath.length > 0) draw(currentPath, annotationColor);
 
+      // Draw Calibration Line
+      if (calibrationLine) {
+          ctx.beginPath(); ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 2;
+          ctx.moveTo(calibrationLine.start.x, calibrationLine.start.y);
+          ctx.lineTo(calibrationLine.end.x, calibrationLine.end.y);
+          ctx.stroke();
+          // Text
+          ctx.fillStyle = '#f59e0b'; ctx.font = 'bold 12px monospace';
+          ctx.fillText(`${calibrationLine.distance}m`, (calibrationLine.start.x + calibrationLine.end.x)/2, (calibrationLine.start.y + calibrationLine.end.y)/2 - 5);
+      }
+
+      // Draw Temp Measure Line
+      if (tempMeasureStart && tempMeasureCurrent) {
+          ctx.beginPath(); ctx.strokeStyle = toolMode === 'calibrate' ? '#f59e0b' : '#10b981'; ctx.lineWidth = 2; ctx.setLineDash([5, 5]);
+          ctx.moveTo(tempMeasureStart.x, tempMeasureStart.y);
+          ctx.lineTo(tempMeasureCurrent.x, tempMeasureCurrent.y);
+          ctx.stroke(); ctx.setLineDash([]);
+          if (toolMode === 'measure' && calibrationFactor) {
+              const d = Math.hypot(tempMeasureCurrent.x - tempMeasureStart.x, tempMeasureCurrent.y - tempMeasureStart.y) / calibrationFactor;
+              ctx.fillStyle = '#10b981'; ctx.font = 'bold 14px monospace';
+              ctx.fillText(`${d.toFixed(2)}m`, tempMeasureCurrent.x + 10, tempMeasureCurrent.y);
+          }
+      }
+
+      // Draw Measurements
+      measurements.forEach(m => {
+          ctx.beginPath(); ctx.strokeStyle = '#10b981'; ctx.lineWidth = 2;
+          ctx.moveTo(m.start.x, m.start.y);
+          ctx.lineTo(m.end.x, m.end.y);
+          ctx.stroke();
+          ctx.fillStyle = '#10b981'; ctx.font = 'bold 12px monospace';
+          ctx.fillText(`${m.realLen.toFixed(2)}m`, (m.start.x + m.end.x)/2, (m.start.y + m.end.y)/2 - 5);
+      });
+
       // Draw ROI Box
       if (roiSelection) {
           const { start, end } = roiSelection;
           const w = end.x - start.x;
           const h = end.y - start.y;
-          
-          ctx.strokeStyle = '#06b6d4'; // Cyan
-          ctx.lineWidth = 2;
-          ctx.setLineDash([6, 3]);
-          ctx.strokeRect(start.x, start.y, w, h);
-          ctx.setLineDash([]);
-          
-          ctx.fillStyle = 'rgba(6, 182, 212, 0.2)';
-          ctx.fillRect(start.x, start.y, w, h);
-
-          // Draw "Corners" for effect
-          const s = 10;
-          ctx.strokeStyle = '#06b6d4';
-          ctx.lineWidth = 4;
-          // Top Left
-          ctx.beginPath(); ctx.moveTo(start.x, start.y + s); ctx.lineTo(start.x, start.y); ctx.lineTo(start.x + s, start.y); ctx.stroke();
-          // Top Right
-          ctx.beginPath(); ctx.moveTo(end.x, start.y + s); ctx.lineTo(end.x, start.y); ctx.lineTo(end.x - s, start.y); ctx.stroke();
-          // Bottom Right
-          ctx.beginPath(); ctx.moveTo(end.x, end.y - s); ctx.lineTo(end.x, end.y); ctx.lineTo(end.x - s, end.y); ctx.stroke();
-          // Bottom Left
-          ctx.beginPath(); ctx.moveTo(start.x, end.y - s); ctx.lineTo(start.x, end.y); ctx.lineTo(start.x + s, end.y); ctx.stroke();
+          ctx.strokeStyle = '#06b6d4'; ctx.lineWidth = 2; ctx.setLineDash([6, 3]);
+          ctx.strokeRect(start.x, start.y, w, h); ctx.setLineDash([]);
+          ctx.fillStyle = 'rgba(6, 182, 212, 0.2)'; ctx.fillRect(start.x, start.y, w, h);
       }
 
-  }, [annotations, currentPath, annotationColor, roiSelection, toolMode]);
+  }, [annotations, currentPath, annotationColor, roiSelection, toolMode, calibrationLine, tempMeasureStart, tempMeasureCurrent, measurements]);
 
   useEffect(() => {
       if (videoRef.current && canvasRef.current) {
@@ -364,204 +561,199 @@ export const AnalysisDashboard: React.FC<AnalysisDashboardProps> = ({ analysis, 
           videoRef.current.currentTime = Math.max(0, Math.min(t, videoRef.current.duration || 0));
       }
   };
+  
+  const stepFrame = (frames: number) => {
+      if (videoRef.current) {
+          videoRef.current.pause();
+          setIsPlaying(false);
+          videoRef.current.currentTime += (frames * 0.033); // approx 30fps
+      }
+  };
 
   const resetTools = () => {
       setZoom(1); setPan({x:0,y:0}); setContrast(100); setAnnotations([]); setToolMode('view');
+      setMeasurements([]); setCalibrationLine(null); setCalibrationFactor(null);
   };
 
-  const generatePdf = (title: string, content: string) => {
-      const doc = new jsPDF();
-      // Header
-      doc.setFillColor(20, 20, 25); // Dark background
-      doc.rect(0, 0, 210, 25, 'F');
-      doc.setTextColor(255, 255, 255);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(14);
-      doc.text("INCIDENT LENS AI", 14, 16);
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(10);
-      doc.setTextColor(150, 150, 150);
-      doc.text("FORENSIC ANALYSIS REPORT", 196, 16, { align: 'right' });
+  const handleChat = async () => {
+      if(!chatInput.trim() || !analysis) return;
+      const userMsg = chatInput;
+      setChatInput('');
+      setChatHistory(prev => [...prev, {role: 'user', text: userMsg}]);
+      setIsChatting(true);
 
-      // Report Title
-      doc.setTextColor(0, 0, 0);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(18);
-      doc.text(title.toUpperCase(), 14, 40);
-      doc.setLineWidth(0.5);
-      doc.line(14, 45, 196, 45);
+      const response = await evaluateCounterfactual(analysis.rawAnalysis, userMsg);
       
-      // Metadata
-      doc.setFontSize(8);
-      doc.setTextColor(100, 100, 100);
-      doc.text(`Generated: ${new Date().toLocaleString()}`, 14, 52);
-      doc.text(`Case Ref: ${analysis?.entities?.[0]?.id || 'UNKNOWN'}`, 196, 52, { align: 'right' });
-
-      // Content
-      doc.setFont("times", "roman");
-      doc.setFontSize(11);
-      doc.setTextColor(40, 40, 40);
-      
-      const splitText = doc.splitTextToSize(content, 180);
-      let y = 65;
-      
-      // Simple pagination handling
-      for (let i = 0; i < splitText.length; i++) {
-        if (y > 280) {
-            doc.addPage();
-            y = 20;
-        }
-        doc.text(splitText[i], 14, y);
-        y += 6;
-      }
-      
-      doc.save(`${title.replace(/\s+/g, '_').toLowerCase()}.pdf`);
+      setChatHistory(prev => [...prev, {role: 'ai', text: response}]);
+      setIsChatting(false);
   };
 
-  const handleExport = async (type: string) => {
+  const generateReportPDF = async (type: 'Summary' | 'Technical' | 'Insurance' | 'Legal' | 'Full') => {
       if (!analysis) return;
-      setGeneratingReport(type);
+      
+      setIsGeneratingReport(true);
+      setReportProgress('Drafting professional narrative via Gemini...');
+
       try {
-          const content = await generateReport(analysis.rawAnalysis, type);
-          generatePdf(type, content);
+        const aiNarrative = await generateReport(analysis.rawAnalysis, type);
+        setReportProgress('Compiling forensics data structures...');
+
+        const doc = new jsPDF();
+        let y = 20;
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const pageHeight = doc.internal.pageSize.getHeight();
+        const margin = 20;
+        const maxWidth = pageWidth - (margin * 2);
+
+        const checkPageBreak = (neededHeight: number = 20) => {
+            if (y + neededHeight > pageHeight - margin) {
+                doc.addPage();
+                y = 20;
+            }
+        };
+
+        const addText = (text: string, size: number = 10, isBold: boolean = false, color: [number, number, number] = [0, 0, 0]) => {
+            doc.setFontSize(size);
+            doc.setFont("helvetica", isBold ? "bold" : "normal");
+            doc.setTextColor(...color);
+            const lines = doc.splitTextToSize(text, maxWidth);
+            doc.text(lines, margin, y);
+            y += (lines.length * size * 0.4) + 4; 
+            checkPageBreak();
+        };
+
+        const addHeader = (text: string) => {
+            checkPageBreak(30);
+            y += 5;
+            doc.setFillColor(240, 240, 245);
+            doc.setDrawColor(200, 200, 200);
+            doc.rect(margin, y - 5, maxWidth, 10, 'FD');
+            doc.setFontSize(11);
+            doc.setFont("helvetica", "bold");
+            doc.setTextColor(40, 40, 60);
+            doc.text(text.toUpperCase(), margin + 3, y + 2);
+            y += 12;
+        };
+
+        const addSeparator = () => {
+            y += 5;
+            doc.setDrawColor(220, 220, 220);
+            doc.line(margin, y, pageWidth - margin, y);
+            y += 8;
+        };
+
+        doc.setFillColor(79, 70, 229); 
+        doc.circle(margin + 5, 25, 5, 'F');
+        doc.setFontSize(24);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(30, 41, 59);
+        doc.text("Incident Lens AI", margin + 15, 28);
+        
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(100, 116, 139);
+        doc.text("FORENSIC VIDEO ANALYSIS SUITE", margin + 15, 33);
+
+        y = 50;
+        doc.setFontSize(10);
+        doc.setTextColor(0,0,0);
+        addText(`REPORT TYPE: ${type.toUpperCase()} DOSSIER`, 12, true);
+        addText(`DATE GENERATED: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`);
+        addText(`CASE REFERENCE: ${analysis.vehicleAnalysis?.vehicles[0]?.entityId || 'UNK'}-${Math.floor(Math.random()*10000)}`);
+        addSeparator();
+
+        addHeader("Professional Analysis Narrative");
+        const cleanNarrative = aiNarrative.replace(/\*\*/g, "").replace(/#/g, "");
+        addText(cleanNarrative, 10, false, [50, 50, 50]);
+        y += 10;
+
+        addHeader("Reconstructed Timeline");
+        ensureArray(analysis.timeline).forEach(evt => {
+            const timeColor: [number, number, number] = evt.type === 'impact' ? [220, 38, 38] : [50, 50, 50];
+            const prefix = evt.type === 'impact' ? ">>> IMPACT: " : "";
+            addText(`[${evt.timestamp}] ${prefix}${evt.description}`, 9, evt.type === 'impact', timeColor);
+        });
+
+        if (analysis.fault) {
+            addHeader("Liability Determination");
+            analysis.fault.allocations.forEach(alloc => {
+                addText(`${alloc.party}: ${alloc.percentage}% Fault`, 10, true, [220, 38, 38]);
+                addText(`Proximate Cause: ${alloc.causalContribution}`, 9);
+                if (alloc.violations.length > 0) {
+                    addText("Violations Cited:", 9, true);
+                    alloc.violations.forEach(v => addText(`  - ${v.rule} (${v.severity})`, 9));
+                }
+                y += 2;
+            });
+        }
+
+        if ((type === 'Technical' || type === 'Full') && analysis.physics?.speedEstimates) {
+            addHeader("Physics & Dynamics");
+            analysis.physics.speedEstimates.forEach(est => {
+                addText(`Target: ${est.entity}`, 10, true, [79, 70, 229]);
+                addText(`Estimated Speed: ${est.minSpeed} - ${est.maxSpeed} ${est.unit}`, 9, true);
+                if (est.calculation) {
+                    addText(`Methodology: ${est.calculation.method}`, 8, false, [100, 100, 100]);
+                }
+                y += 2;
+            });
+        }
+
+        addHeader("Forensic Authenticity Audit");
+        if (analysis.authenticity) {
+            addText(`Integrity Score: ${analysis.authenticity.integrityScore}/100`, 10, true);
+            addText(`Assessment: ${analysis.authenticity.overallAssessment}`, 9);
+            addText(`Metadata Check: ${analysis.authenticity.metadataAnalysis?.status}`, 9);
+        } else {
+            addText("No authenticity data available.", 9);
+        }
+
+        const totalPages = doc.internal.pages.length;
+        for (let i = 1; i <= totalPages; i++) {
+            doc.setPage(i);
+            doc.setFontSize(8);
+            doc.setTextColor(150, 150, 150);
+            doc.text(`Generated by Incident Lens AI - Page ${i} of ${totalPages}`, pageWidth / 2, pageHeight - 10, { align: 'center' });
+            doc.text("CONFIDENTIAL - FORENSIC WORK PRODUCT", margin, pageHeight - 10);
+        }
+
+        doc.save(`IncidentLens_${type}_Report.pdf`);
+
       } catch (e) {
-          console.error("Report generation failed", e);
+          console.error("PDF Generation failed", e);
+          alert("Failed to generate report. Please try again.");
       } finally {
-          setGeneratingReport(null);
+          setIsGeneratingReport(false);
+          setReportProgress('');
       }
   };
 
-  // Decide what text to show in the log
-  // If analysis is done, use rawAnalysis (which contains the full log). 
-  // If streaming, use streamingLog.
   const contentToRender = analysis ? analysis.rawAnalysis : streamingLog;
 
   return (
-    <div className="flex flex-col lg:flex-row h-full bg-background overflow-hidden animate-fade-in relative">
-      
-      {/* ... (Existing Confidence and ROI Modals) ... */}
+    <div className="flex flex-col lg:flex-row h-full bg-background overflow-hidden animate-fade-in relative selection:bg-primaryLight selection:text-primary">
       
       {/* --- CONFIDENCE AUDIT MODAL --- */}
       {confidenceModalOpen && analysis?.confidenceReport && (
-          <div className="absolute inset-0 z-[100] bg-black/90 backdrop-blur flex items-center justify-center p-6 animate-fade-in">
-              {/* ... (Modal content unchanged) ... */}
-              <div className="bg-surface border border-white/10 rounded-2xl w-full max-w-5xl shadow-2xl flex flex-col max-h-[90vh]">
-                  <div className="p-6 border-b border-white/5 flex justify-between items-center bg-[#121216]">
+          <div className="absolute inset-0 z-[100] bg-textPrimary/20 backdrop-blur-sm flex items-center justify-center p-6 animate-fade-in">
+              <div className="bg-surface border border-border rounded-2xl w-full max-w-5xl shadow-2xl flex flex-col max-h-[90vh]">
+                  <div className="p-6 border-b border-border flex justify-between items-center bg-surfaceHighlight">
                       <div className="flex items-center gap-3">
                           <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                              analysis.confidenceReport.overallLevel === 'High' ? 'bg-emerald-500/20 text-emerald-400' :
-                              analysis.confidenceReport.overallLevel === 'Moderate' ? 'bg-amber-500/20 text-amber-400' : 'bg-rose-500/20 text-rose-400'
+                              analysis.confidenceReport.overallLevel === 'High' ? 'bg-emerald-100 text-emerald-600' :
+                              analysis.confidenceReport.overallLevel === 'Moderate' ? 'bg-amber-100 text-amber-600' : 'bg-rose-100 text-rose-600'
                           }`}>
                               <ShieldCheck size={20} />
                           </div>
                           <div>
-                              <h3 className="text-lg font-bold text-white">Forensic Confidence Audit</h3>
-                              <p className="text-xs text-textSecondary">Reliability assessment of automated findings</p>
+                              <h3 className="text-lg font-bold text-textPrimary font-sans">Forensic Confidence Audit</h3>
+                              <p className="text-xs text-textSecondary font-mono">Reliability assessment of automated findings</p>
                           </div>
                       </div>
-                      <button onClick={() => setConfidenceModalOpen(false)} className="text-textSecondary hover:text-white p-2 rounded-full hover:bg-white/10"><X size={20}/></button>
+                      <button onClick={() => setConfidenceModalOpen(false)} className="text-textTertiary hover:text-textPrimary p-2 rounded-full hover:bg-border"><X size={20}/></button>
                   </div>
-                  
                   <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                          {/* ... (Existing confidence modal internals) ... */}
-                          {/* Left Column: Score & Summary */}
-                          <div className="space-y-6">
-                              <div className="relative w-48 h-48 mx-auto flex items-center justify-center">
-                                  <svg className="absolute inset-0 -rotate-90 w-full h-full" viewBox="0 0 100 100">
-                                      <circle cx="50" cy="50" r="45" fill="none" stroke="#27272a" strokeWidth="8" />
-                                      <circle cx="50" cy="50" r="45" fill="none" 
-                                        stroke={analysis.confidenceReport.overallLevel === 'High' ? '#10b981' : analysis.confidenceReport.overallLevel === 'Moderate' ? '#f59e0b' : '#f43f5e'} 
-                                        strokeWidth="8" 
-                                        strokeDasharray={`${analysis.confidenceReport.overallScore * 2.83}, 283`}
-                                        strokeLinecap="round"
-                                      />
-                                  </svg>
-                                  <div className="text-center">
-                                      <div className="text-4xl font-mono font-bold text-white">{analysis.confidenceReport.overallScore}</div>
-                                      <div className={`text-xs font-bold uppercase tracking-widest ${
-                                          analysis.confidenceReport.overallLevel === 'High' ? 'text-emerald-400' :
-                                          analysis.confidenceReport.overallLevel === 'Moderate' ? 'text-amber-400' : 'text-rose-400'
-                                      }`}>{analysis.confidenceReport.overallLevel}</div>
-                                  </div>
-                              </div>
-                              <div className="p-4 bg-white/5 rounded-lg border border-white/5 text-xs text-gray-300 leading-relaxed">
-                                  {analysis.confidenceReport.confidenceStatement}
-                              </div>
-                          </div>
-
-                          {/* Middle Column: Dimensions */}
-                          <div className="space-y-6">
-                              <h4 className="text-xs font-bold text-textTertiary uppercase tracking-widest border-b border-white/5 pb-2">Analysis Dimensions</h4>
-                              {[
-                                  { label: "Entity Identification", val: analysis.confidenceReport.metrics.identification },
-                                  { label: "Temporal Precision", val: analysis.confidenceReport.metrics.timing },
-                                  { label: "Physics Calculations", val: analysis.confidenceReport.metrics.physics },
-                                  { label: "Causal Reasoning", val: analysis.confidenceReport.metrics.causation },
-                              ].map((m, i) => (
-                                  <div key={i}>
-                                      <div className="flex justify-between text-xs mb-1.5">
-                                          <span className="text-gray-400">{m.label}</span>
-                                          <span className={`font-bold ${
-                                              m.val === 'High' ? 'text-emerald-400' : m.val === 'Moderate' ? 'text-amber-400' : 'text-rose-400'
-                                          }`}>{m.val}</span>
-                                      </div>
-                                      <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
-                                          <div className={`h-full rounded-full ${
-                                              m.val === 'High' ? 'bg-emerald-500 w-[95%]' : m.val === 'Moderate' ? 'bg-amber-500 w-[70%]' : 'bg-rose-500 w-[40%]'
-                                          }`}></div>
-                                      </div>
-                                  </div>
-                              ))}
-                              {analysis.confidenceReport.uncertaintyFactors?.length > 0 && (
-                                  <div className="mt-6">
-                                      <h4 className="text-xs font-bold text-textTertiary uppercase tracking-widest border-b border-white/5 pb-2 mb-3">Uncertainty Factors</h4>
-                                      <div className="space-y-2">
-                                          {(analysis.confidenceReport.uncertaintyFactors || []).map((f, i) => (
-                                              <div key={i} className="flex gap-2 items-start p-2 rounded bg-rose-500/10 border border-rose-500/20">
-                                                  <AlertTriangle size={14} className="text-rose-400 mt-0.5 shrink-0" />
-                                                  <div>
-                                                      <div className="text-xs font-bold text-rose-300">{f.category}</div>
-                                                      <div className="text-[10px] text-rose-200/70">{f.description}</div>
-                                                  </div>
-                                              </div>
-                                          ))}
-                                      </div>
-                                  </div>
-                              )}
-                          </div>
-
-                          {/* Right Column: Alternatives */}
-                          <div className="space-y-6">
-                              <h4 className="text-xs font-bold text-textTertiary uppercase tracking-widest border-b border-white/5 pb-2">Alternative Interpretations</h4>
-                              {analysis.confidenceReport.alternatives?.length > 0 ? (
-                                  (analysis.confidenceReport.alternatives || []).map((alt, i) => (
-                                      <div key={i} className="p-3 bg-surfaceHighlight rounded border border-white/5">
-                                          <div className="flex justify-between items-start mb-1">
-                                              <span className="text-xs font-bold text-white w-3/4">{alt.scenario}</span>
-                                              <span className="text-[10px] bg-white/10 px-1.5 py-0.5 rounded text-gray-400">{alt.likelihood}</span>
-                                          </div>
-                                          <p className="text-[10px] text-gray-500">{alt.supportingEvidence}</p>
-                                      </div>
-                                  ))
-                              ) : (
-                                  <div className="flex flex-col items-center justify-center h-32 text-gray-600 border border-dashed border-white/10 rounded">
-                                      <CheckCircle2 size={24} className="mb-2 opacity-50"/>
-                                      <span className="text-xs">No dominant alternatives identified</span>
-                                  </div>
-                              )}
-                              <div className="pt-4 border-t border-white/5">
-                                  <h4 className="text-[10px] font-bold text-textTertiary uppercase mb-2">Recommendations</h4>
-                                  <ul className="space-y-1">
-                                      {analysis.confidenceReport.improvementRecommendations?.map((rec, i) => (
-                                          <li key={i} className="text-[10px] text-gray-400 flex gap-2">
-                                              <span className="text-primary">•</span> {rec}
-                                          </li>
-                                      ))}
-                                  </ul>
-                              </div>
-                          </div>
-                      </div>
+                     <div className="p-4 bg-background rounded-lg border border-border text-sm text-textSecondary leading-relaxed">{analysis.confidenceReport.confidenceStatement}</div>
                   </div>
               </div>
           </div>
@@ -569,648 +761,572 @@ export const AnalysisDashboard: React.FC<AnalysisDashboardProps> = ({ analysis, 
 
       {/* --- ROI MODAL --- */}
       {roiModalOpen && roiImage && (
-          <div className="absolute inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-8 animate-fade-in">
-              {/* ... (ROI modal content unchanged) ... */}
-              <div className="bg-surface border border-white/10 rounded-2xl w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col md:flex-row max-h-[80vh]">
-                  <div className="md:w-1/2 bg-black flex items-center justify-center p-6 border-b md:border-b-0 md:border-r border-white/5 relative">
-                      <div className="absolute top-4 left-4 text-[10px] font-mono text-cyan-400 uppercase tracking-widest bg-cyan-900/20 px-2 py-1 rounded border border-cyan-500/20">Source Crop</div>
-                      <img src={roiImage} className="max-w-full max-h-full object-contain shadow-[0_0_30px_rgba(6,182,212,0.15)] border border-cyan-500/30" />
+          <div className="absolute inset-0 z-[100] bg-textPrimary/20 backdrop-blur-sm flex items-center justify-center p-8 animate-fade-in">
+              <div className="bg-surface border border-border rounded-2xl w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col md:flex-row max-h-[80vh]">
+                  <div className="md:w-1/2 bg-black flex items-center justify-center p-6 border-r border-border relative overflow-hidden group">
+                      <div className="absolute top-4 left-4 text-[10px] font-mono text-white bg-slate-800/80 px-2 py-1 rounded border border-white/10 z-20">Source Crop</div>
+                      <img src={roiImage} className="max-w-full max-h-full object-contain shadow-lg relative z-10" />
+                      {/* Scan Line Animation */}
+                      {isRoiAnalyzing && (
+                        <div className="absolute inset-0 z-30 pointer-events-none">
+                            <div className="w-full h-full bg-primary/10 absolute inset-0"></div>
+                            <div className="w-full h-12 bg-gradient-to-b from-transparent via-primary/40 to-transparent absolute top-0 left-0 animate-[scan_1.5s_linear_infinite] shadow-[0_0_20px_rgba(79,70,229,0.5)]"></div>
+                        </div>
+                      )}
                   </div>
-                  <div className="md:w-1/2 p-6 flex flex-col">
+                  <div className="md:w-1/2 p-6 flex flex-col bg-surface relative">
                       <div className="flex justify-between items-center mb-6">
-                          <h3 className="text-lg font-bold text-white flex items-center gap-2"><Scan size={20} className="text-cyan-400"/> Deep Scan Analysis</h3>
-                          <button onClick={() => { setRoiModalOpen(false); setRoiResult(null); setRoiQuery(''); }} className="text-gray-500 hover:text-white"><X size={20}/></button>
+                          <h3 className="text-lg font-bold text-textPrimary flex items-center gap-2"><Scan size={20} className="text-primary"/> Deep Scan Analysis</h3>
+                          <button onClick={() => { setRoiModalOpen(false); setRoiResult(null); setRoiQuery(''); }} className="text-textTertiary hover:text-textPrimary"><X size={20}/></button>
                       </div>
-                      
-                      <div className="flex-1 overflow-y-auto custom-scrollbar mb-4">
-                          {roiResult ? (
+                      <div className="flex-1 overflow-y-auto custom-scrollbar mb-4 relative">
+                          {isRoiAnalyzing ? (
+                              <div className="absolute inset-0 flex flex-col items-center justify-center bg-surface z-20">
+                                <div className="relative w-20 h-20 mb-6">
+                                    <div className="absolute inset-0 border-4 border-primary/20 rounded-full"></div>
+                                    <div className="absolute inset-0 border-4 border-t-primary rounded-full animate-spin"></div>
+                                    <div className="absolute inset-4 bg-primaryLight/30 rounded-full flex items-center justify-center animate-pulse">
+                                        <Search size={24} className="text-primary" />
+                                    </div>
+                                </div>
+                                <h4 className="text-sm font-bold text-primary font-mono uppercase tracking-widest animate-pulse">Running Forensic Query</h4>
+                                <p className="text-xs text-textSecondary mt-2 font-mono">Analyzing visual vectors...</p>
+                              </div>
+                          ) : roiResult ? (
                               <div className="space-y-4 animate-fade-in">
-                                  <div className="p-4 bg-cyan-500/10 border border-cyan-500/30 rounded-lg">
-                                      <h4 className="text-xs font-bold text-cyan-300 uppercase mb-2">Analysis Result</h4>
-                                      <p className="text-sm text-gray-200 leading-relaxed">{roiResult.answer}</p>
+                                  <div className="p-4 bg-primaryLight/50 border border-primaryLight rounded-lg">
+                                      <h4 className="text-xs font-bold text-primary uppercase mb-2 font-mono">Analysis Result</h4>
+                                      <p className="text-sm text-textPrimary leading-relaxed font-sans">{roiResult.answer}</p>
                                   </div>
-                                  <div className="grid grid-cols-2 gap-4">
-                                      <div className="p-3 bg-surfaceHighlight rounded border border-white/5">
-                                          <div className="text-[10px] text-gray-500 uppercase">Confidence</div>
-                                          <div className="text-sm font-bold text-white">{roiResult.confidence}</div>
-                                      </div>
-                                      <div className="p-3 bg-surfaceHighlight rounded border border-white/5">
-                                          <div className="text-[10px] text-gray-500 uppercase">Details</div>
-                                          <div className="text-xs text-gray-300 truncate">{roiResult.details}</div>
-                                      </div>
-                                  </div>
+                                  {roiResult.details && (
+                                     <div className="p-3 bg-background border border-border rounded-lg">
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <Activity size={12} className="text-textTertiary"/>
+                                            <h4 className="text-[10px] font-bold text-textTertiary uppercase font-mono">Confidence & Details</h4>
+                                        </div>
+                                        <p className="text-xs text-textSecondary font-mono leading-relaxed">{roiResult.details}</p>
+                                     </div>
+                                  )}
                               </div>
-                          ) : (
-                              <div className="flex flex-col items-center justify-center h-full text-gray-500 space-y-3">
-                                  <Scan size={48} className="opacity-20"/>
-                                  <p className="text-xs text-center">Select an area to inspect specific details <br/> like license plates, debris, or signals.</p>
-                              </div>
-                          )}
+                          ) : <div className="flex flex-col items-center justify-center h-full text-center opacity-40">
+                                <Crosshair size={48} className="text-textTertiary mb-3" />
+                                <p className="text-xs text-textSecondary font-mono">Select region & ask questions<br/>to extract specific details</p>
+                              </div>}
                       </div>
-
-                      <div className="mt-auto">
-                          <label className="text-[10px] uppercase font-bold text-gray-500 mb-2 block">Investigative Query</label>
-                          <div className="flex gap-2">
+                      <div className="mt-auto flex gap-2">
                               <input 
                                 type="text" 
-                                value={roiQuery}
-                                onChange={(e) => setRoiQuery(e.target.value)}
-                                placeholder="E.g., 'Read the license plate' or 'Describe the damage'"
-                                className="flex-1 bg-black/50 border border-white/10 rounded-lg px-4 py-3 text-sm text-white focus:border-cyan-500 focus:outline-none"
+                                value={roiQuery} 
+                                onChange={(e) => setRoiQuery(e.target.value)} 
+                                onKeyDown={(e) => e.key === 'Enter' && !isRoiAnalyzing && roiQuery && (() => { setIsRoiAnalyzing(true); analyzeRegionOfInterest(roiImage.split(',')[1], roiQuery).then(res => { setRoiResult(res); setIsRoiAnalyzing(false); }) })()}
+                                placeholder="Investigate area..." 
+                                className="flex-1 bg-background border border-border rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-all" 
+                                disabled={isRoiAnalyzing}
                               />
-                              <button 
-                                onClick={() => { 
-                                    if(!roiQuery) return;
-                                    setIsRoiAnalyzing(true);
-                                    analyzeRegionOfInterest(roiImage.split(',')[1], roiQuery).then(res => {
-                                        setRoiResult(res);
-                                        setIsRoiAnalyzing(false);
-                                    })
-                                }}
-                                disabled={isRoiAnalyzing || !roiQuery}
-                                className="px-4 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg disabled:opacity-50 flex items-center justify-center min-w-[60px]"
-                              >
-                                  {isRoiAnalyzing ? <Loader2 size={20} className="animate-spin"/> : <Search size={20}/>}
+                              <button onClick={() => { if(!roiQuery) return; setIsRoiAnalyzing(true); analyzeRegionOfInterest(roiImage.split(',')[1], roiQuery).then(res => { setRoiResult(res); setIsRoiAnalyzing(false); }) }} disabled={isRoiAnalyzing || !roiQuery} className="px-4 bg-primary text-white rounded-lg hover:bg-primaryHover disabled:opacity-50 transition-colors shadow-sm">
+                                {isRoiAnalyzing ? <Loader2 size={18} className="animate-spin"/> : <Search size={18}/>}
                               </button>
-                          </div>
                       </div>
                   </div>
               </div>
           </div>
       )}
 
-      {/* --- LEFT PANEL: INTEGRATED EVIDENCE VIEWER --- */}
-      <div className="flex-1 flex flex-col min-w-0 bg-[#07070a] relative border-r border-white/5">
-         {/* ... (Existing Left Panel Content) ... */}
-         {/* Top Bar: Stats */}
-         <div className="h-10 border-b border-white/5 flex items-center justify-between px-4 bg-[#0a0a0f]">
-             <div className="flex items-center gap-6 text-[10px] font-mono text-textTertiary uppercase tracking-widest">
-                 <span className="flex items-center gap-1.5"><Clock size={10} className="text-primary"/> {currentTime.toFixed(3)}s / {videoDuration.toFixed(2)}s</span>
-                 {analysis && <span className="flex items-center gap-1.5"><Activity size={10} className="text-primary"/> {analysis?.timeline?.length || 0} Events</span>}
-                 <span className="flex items-center gap-1.5"><Video size={10} className="text-primary"/> {videoRef.current?.videoWidth}x{videoRef.current?.videoHeight} Source</span>
+      {/* --- LEFT PANEL: VIDEO PLAYER --- */}
+      <div className="flex-1 flex flex-col min-w-0 bg-slate-900 relative border-r border-border transition-all duration-75">
+         {/* Top Bar: Stats Overlay */}
+         <div className="h-12 border-b border-white/10 flex items-center justify-between px-6 bg-slate-900/95 backdrop-blur-md relative z-20 shadow-sm">
+             <div className="flex items-center gap-6 text-[10px] font-mono text-slate-400 uppercase tracking-widest">
+                 <span className="flex items-center gap-1.5"><Clock size={12} className="text-primary"/> <span className="text-white font-bold">{currentTime.toFixed(3)}s</span> / {videoDuration.toFixed(2)}s</span>
+                 {analysis && <span className="flex items-center gap-1.5"><Activity size={12} className="text-primary"/> <span className="text-white font-bold">{ensureArray(analysis.timeline).length}</span> Events</span>}
+                 <span className="flex items-center gap-1.5"><Video size={12} className="text-primary"/> {videoRef.current?.videoWidth || 'Source'}</span>
              </div>
              {analysis?.confidenceReport && (
-                <button 
-                    onClick={() => setConfidenceModalOpen(true)}
-                    className="flex items-center gap-2 hover:bg-white/5 px-2 py-0.5 rounded transition-colors group cursor-pointer"
-                >
-                    <span className="text-[9px] text-textTertiary font-bold uppercase group-hover:text-white">Reliability Score</span>
-                    <div className={`text-[10px] font-mono font-bold ${
-                        analysis.confidenceReport.overallScore >= 80 ? 'text-emerald-400' :
-                        analysis.confidenceReport.overallScore >= 50 ? 'text-amber-400' : 'text-rose-400'
-                    }`}>{analysis.confidenceReport.overallScore}/100</div>
-                    <HelpCircle size={10} className="text-textTertiary" />
+                <button onClick={() => setConfidenceModalOpen(true)} className="flex items-center gap-2 bg-slate-800 px-3 py-1.5 rounded-full border border-slate-700 hover:bg-slate-700 transition-colors group">
+                    <ShieldCheck size={12} className="text-emerald-400 group-hover:text-emerald-300" />
+                    <span className="text-[10px] text-slate-300 font-bold uppercase group-hover:text-white">Confidence</span>
+                    <div className="text-[10px] font-mono font-bold text-white">{analysis.confidenceReport.overallScore}%</div>
                 </button>
              )}
          </div>
 
          {/* Video Viewport */}
-         <div className="flex-1 relative overflow-hidden flex items-center justify-center bg-[#050505] group select-none">
+         <div className="flex-1 relative overflow-hidden flex items-center justify-center bg-black group select-none">
              <div 
-                className={`relative w-full h-full max-h-full ${toolMode === 'scan' ? 'cursor-crosshair' : toolMode === 'draw' ? 'cursor-cell' : isPanning ? 'cursor-grabbing' : 'cursor-default'}`}
-                onMouseDown={handleMouseDown}
-                onMouseMove={handleMouseMove}
-                onMouseUp={handleMouseUp}
-                onMouseLeave={handleMouseUp}
+                className={`relative w-full h-full max-h-full ${toolMode === 'scan' || toolMode === 'calibrate' || toolMode === 'measure' ? 'cursor-crosshair' : toolMode === 'draw' ? 'cursor-cell' : isPanning ? 'cursor-grabbing' : 'cursor-default'}`}
+                onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}
              >
-                 <div className="w-full h-full transition-transform duration-100 ease-out origin-center"
-                      style={{ transform: `scale(${zoom}) translate(${pan.x}px, ${pan.y}px)` }}>
-                     <video 
-                        ref={videoRef} 
-                        src={videoSources[activeSourceIdx]?.url} 
-                        className="w-full h-full object-contain"
-                        style={{ filter: `contrast(${contrast}%)` }}
-                        onLoadedMetadata={(e) => setVideoDuration(e.currentTarget.duration)}
-                        crossOrigin="anonymous"
-                     />
+                 <div className="w-full h-full transition-transform duration-100 ease-out origin-center" style={{ transform: `scale(${zoom}) translate(${pan.x}px, ${pan.y}px)` }}>
+                     <video ref={videoRef} src={videoSources[activeSourceIdx]?.url} className="w-full h-full object-contain" style={{ filter: `contrast(${contrast}%)` }} onLoadedMetadata={(e) => setVideoDuration(e.currentTarget.duration)} crossOrigin="anonymous" />
                      <canvas ref={canvasRef} className="absolute inset-0 w-full h-full pointer-events-none" />
                  </div>
              </div>
 
-             {/* Judge Mode Overlay */}
-             {judgeMode && <div className="absolute top-4 right-4 px-3 py-1 bg-danger/10 border border-danger/40 text-danger text-[9px] font-bold tracking-widest uppercase animate-pulse backdrop-blur-md rounded">Adjudication Mode Active</div>}
-             
-             {/* Multi-Source Switcher Overlay */}
-             {videoSources.length > 1 && (
-                 <div className="absolute top-4 left-4 flex flex-col gap-2 z-50 animate-fade-in">
-                      {videoSources.map((src, idx) => (
-                          <button
-                            key={src.id}
-                            onClick={() => setActiveSourceIdx(idx)}
-                            className={`
-                                w-20 h-12 rounded border overflow-hidden relative transition-all shadow-lg group
-                                ${activeSourceIdx === idx ? 'border-primary ring-2 ring-primary/50' : 'border-white/20 opacity-70 hover:opacity-100'}
-                            `}
-                          >
-                              <video src={src.url} className="w-full h-full object-cover" />
-                              <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition-colors flex items-center justify-center">
-                                  <span className="text-[9px] font-bold text-white shadow-black drop-shadow-md tracking-wider">CAM {idx+1}</span>
-                              </div>
-                          </button>
-                      ))}
-                 </div>
-             )}
-             
-             {/* Integrated HUD */}
-             <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-1 p-1.5 bg-surfaceHighlight/90 backdrop-blur-xl border border-white/10 rounded-full shadow-2xl transition-all duration-300 translate-y-4 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 z-40">
-                 <button onClick={() => handleSeek(currentTime - 1)} className="p-2 rounded-full hover:bg-white/10 text-textSecondary"><ChevronLeft size={16}/></button>
-                 <button onClick={togglePlay} className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white">{isPlaying ? <Pause size={18} fill="currentColor"/> : <Play size={18} fill="currentColor"/>}</button>
-                 <button onClick={() => handleSeek(currentTime + 1)} className="p-2 rounded-full hover:bg-white/10 text-textSecondary"><ChevronRight size={16}/></button>
-                 <div className="w-px h-4 bg-white/10 mx-2"></div>
-                 
-                 <button onClick={() => setZoom(Math.max(1, zoom-0.5))} className="p-2 rounded-full hover:bg-white/10 text-textSecondary"><Minimize2 size={16}/></button>
-                 <span className="text-[10px] font-mono font-bold text-primary w-6 text-center">{zoom}x</span>
-                 <button onClick={() => setZoom(Math.min(5, zoom+0.5))} className="p-2 rounded-full hover:bg-white/10 text-textSecondary"><ZoomIn size={16}/></button>
-                 <div className="w-px h-4 bg-white/10 mx-2"></div>
-                 
-                 {/* TOOL TOGGLES */}
-                 <button 
-                    onClick={() => setToolMode(toolMode === 'draw' ? 'view' : 'draw')} 
-                    className={`p-2 rounded-full transition-all ${toolMode === 'draw' ? 'bg-primary text-white shadow-glow-primary' : 'hover:bg-white/10 text-textSecondary'}`}
-                    title="Annotation Tool"
-                 >
-                    <PenTool size={16}/>
-                 </button>
-
-                 <button 
-                    onClick={() => setToolMode(toolMode === 'scan' ? 'view' : 'scan')} 
-                    className={`p-2 rounded-full transition-all ${toolMode === 'scan' ? 'bg-cyan-600 text-white shadow-[0_0_15px_rgba(6,182,212,0.4)]' : 'hover:bg-white/10 text-textSecondary'}`}
-                    title="Deep Scan (ROI)"
-                 >
-                    <Scan size={16}/>
-                 </button>
-
-                 {toolMode === 'draw' && (
-                     <div className="flex gap-1 ml-1 animate-fade-in">
-                        {['#ef4444', '#10b981', '#3b82f6'].map(c => (
-                            <button key={c} onClick={() => setAnnotationColor(c)} className={`w-3 h-3 rounded-full border border-white/20`} style={{background: c, transform: annotationColor === c ? 'scale(1.2)' : 'scale(1)'}} />
-                        ))}
+             {/* Advanced HUD */}
+             <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 transition-all duration-300 translate-y-8 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 z-40">
+                 {calibrationFactor && (
+                     <div className="bg-slate-900/90 text-emerald-400 px-3 py-1 rounded-full text-[10px] font-mono border border-emerald-500/30 shadow-lg mb-1 flex items-center gap-2 backdrop-blur-md">
+                         <Ruler size={10} /> Scale: {(1/calibrationFactor).toFixed(3)} m/px
                      </div>
                  )}
-                 <button onClick={resetTools} className="p-2 rounded-full hover:text-danger text-textSecondary ml-2"><RotateCcw size={16}/></button>
-             </div>
-             
-             {/* Scan Instruction Overlay */}
-             {toolMode === 'scan' && (
-                 <div className="absolute top-8 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur px-4 py-2 rounded-full border border-cyan-500/30 text-cyan-400 text-xs flex items-center gap-2 pointer-events-none animate-pulse">
-                     <Crosshair size={14}/> Drag to select region for analysis
+                 <div className="flex items-center gap-2 p-2 bg-slate-900/90 backdrop-blur-md border border-slate-700/50 rounded-full shadow-2xl">
+                    <div className="flex items-center gap-1 pr-3 border-r border-slate-700/50">
+                        <button onClick={() => stepFrame(-1)} className="p-2 rounded-full hover:bg-white/10 text-slate-400 hover:text-white transition-colors" title="Prev Frame"><ChevronLeft size={16}/></button>
+                        <button onClick={togglePlay} className="p-3 rounded-full bg-white text-black hover:bg-primary hover:text-white transition-all shadow-glow mx-1">{isPlaying ? <Pause size={18} fill="currentColor"/> : <Play size={18} fill="currentColor" className="ml-0.5"/>}</button>
+                        <button onClick={() => stepFrame(1)} className="p-2 rounded-full hover:bg-white/10 text-slate-400 hover:text-white transition-colors" title="Next Frame"><ChevronRight size={16}/></button>
+                    </div>
+                    <div className="flex items-center gap-1 px-2 border-r border-slate-700/50">
+                        <button onClick={() => setPlaybackSpeed(0.25)} className={`text-[10px] font-bold px-1.5 py-1 rounded ${playbackSpeed === 0.25 ? 'bg-primary text-white' : 'text-slate-400 hover:text-white'}`}>0.25x</button>
+                        <button onClick={() => setPlaybackSpeed(0.5)} className={`text-[10px] font-bold px-1.5 py-1 rounded ${playbackSpeed === 0.5 ? 'bg-primary text-white' : 'text-slate-400 hover:text-white'}`}>0.5x</button>
+                        <button onClick={() => setPlaybackSpeed(1)} className={`text-[10px] font-bold px-1.5 py-1 rounded ${playbackSpeed === 1 ? 'bg-primary text-white' : 'text-slate-400 hover:text-white'}`}>1x</button>
+                    </div>
+                    <div className="flex items-center gap-1 pl-1">
+                        <button onClick={() => setZoom(Math.max(1, zoom-0.5))} className="p-2 rounded-full hover:bg-white/10 text-slate-400 hover:text-white"><Minimize2 size={16}/></button>
+                        <span className="text-[10px] font-mono font-bold text-white w-8 text-center bg-white/10 rounded px-1">{zoom}x</span>
+                        <button onClick={() => setZoom(Math.min(5, zoom+0.5))} className="p-2 rounded-full hover:bg-white/10 text-slate-400 hover:text-white"><ZoomIn size={16}/></button>
+                    </div>
+                    <div className="w-px h-6 bg-slate-700/50 mx-1"></div>
+                    <div className="flex gap-1">
+                        <button onClick={() => setToolMode(toolMode === 'draw' ? 'view' : 'draw')} className={`p-2 rounded-full transition-all ${toolMode === 'draw' ? 'bg-primary text-white' : 'hover:bg-white/10 text-slate-400 hover:text-white'}`} title="Annotate"><PenTool size={16}/></button>
+                        <button onClick={() => setToolMode(toolMode === 'scan' ? 'view' : 'scan')} className={`p-2 rounded-full transition-all ${toolMode === 'scan' ? 'bg-primary text-white' : 'hover:bg-white/10 text-slate-400 hover:text-white'}`} title="AI Scan"><Scan size={16}/></button>
+                        <button onClick={() => setToolMode('calibrate')} className={`p-2 rounded-full transition-all ${toolMode === 'calibrate' ? 'bg-amber-500 text-white' : 'hover:bg-white/10 text-slate-400 hover:text-white'}`} title="Calibrate Scale"><Ruler size={16}/></button>
+                        <button onClick={() => setToolMode('measure')} disabled={!calibrationFactor} className={`p-2 rounded-full transition-all ${toolMode === 'measure' ? 'bg-emerald-500 text-white' : 'hover:bg-white/10 text-slate-400 hover:text-white disabled:opacity-30'}`} title="Measure"><Calculator size={16}/></button>
+                    </div>
+                    <button onClick={resetTools} className="p-2 rounded-full hover:text-danger text-slate-400 ml-1"><RotateCcw size={16}/></button>
                  </div>
-             )}
+             </div>
          </div>
 
          {/* Timeline */}
-         <div className="shrink-0 bg-[#0a0a0f] z-10">
-             <TimelineTrack 
-                duration={videoDuration} 
-                currentTime={currentTime} 
-                onSeek={handleSeek} 
-                events={analysis?.timeline || []} 
-             />
+         <div className="shrink-0 bg-surface z-10 border-t border-border relative">
+             <TimelineTrack duration={videoDuration} currentTime={currentTime} onSeek={handleSeek} events={ensureArray(analysis?.timeline)} />
          </div>
       </div>
 
+      {/* --- RESIZE HANDLE --- */}
+      {!isPanelCollapsed && (
+          <div className="hidden lg:flex w-1 bg-background hover:bg-primaryLight cursor-col-resize items-center justify-center transition-all z-30 group relative border-l border-r border-border" onMouseDown={startResizing}>
+              <div className="absolute inset-y-0 -left-2 -right-2 z-10" /> 
+              <div className="w-0.5 h-12 bg-borderStrong rounded-full group-hover:bg-primary transition-colors" />
+          </div>
+      )}
+
       {/* --- RIGHT PANEL: INTELLIGENCE HUB --- */}
-      <div className="w-full lg:w-[420px] bg-surface border-l border-white/5 flex flex-col relative z-20 shadow-panel">
-          
-          {/* Navigation Tabs */}
-          <div className="px-2 pt-2 bg-[#0c0c10] border-b border-white/5">
-              <div className="flex gap-0.5 overflow-x-auto custom-scrollbar pb-1">
+      <div 
+        className={`bg-surface border-l border-border flex flex-col relative z-20 shadow-panel transition-[width] duration-75 ease-linear ${isPanelCollapsed ? 'hidden' : 'flex'}`}
+        style={{ width: isPanelCollapsed ? 0 : window.innerWidth >= 1024 ? rightPanelWidth : '100%' }}
+      >
+          {/* Header */}
+          <div className="px-2 bg-surfaceHighlight border-b border-border flex items-center h-12 justify-between">
+              <div className="flex-1 overflow-x-auto custom-scrollbar flex gap-1 h-full items-end pb-0">
                   {[
                       { id: 'log', label: 'Reasoning', icon: Terminal },
+                      { id: 'reports', label: 'Reports', icon: FileType },
+                      { id: 'chat', label: 'Investigate', icon: MessageSquare },
                       { id: 'authenticity', label: 'Verify', icon: FileCheck },
-                      { id: 'narrative', label: 'Narrative', icon: BookOpen }, // NEW TAB
+                      { id: 'narrative', label: 'Narrative', icon: BookOpen },
+                      { id: 'entities', label: 'Entities', icon: User },
                       { id: 'scene', label: 'Scene', icon: Cloud },
                       { id: 'damage', label: 'Damage', icon: Hammer },
-                      { id: 'hazards', label: 'Hazards', icon: AlertTriangle }, 
                       { id: 'signals', label: 'Signals', icon: Signal },
-                      { id: 'entities', label: 'Entities', icon: Truck },
-                      { id: 'vehicles', label: 'Vehicles', icon: Car }, 
+                      { id: 'vehicles', label: 'Vehicles', icon: Car },
                       { id: 'occupants', label: 'Occupants', icon: User },
-                      { id: 'debris', label: 'Debris', icon: Share2 },
                       { id: 'physics', label: 'Physics', icon: Zap },
+                      { id: 'liability', label: 'Liability', icon: Gavel },
+                      { id: 'debris', label: 'Debris', icon: Share2 },
                       { id: 'audio', label: 'Audio', icon: Waves },
                       { id: 'shadows', label: 'Shadows', icon: Sun },
-                      { id: 'reflections', label: 'Reflect', icon: Sparkles },
-                      { id: 'synthesis', label: 'Synth', icon: Layers },
                       { id: 'sim', label: 'Sim', icon: GitPullRequest },
-                      { id: 'liability', label: 'Liability', icon: Gavel },
+                      { id: 'synthesis', label: 'Synth', icon: Layers },
+                      { id: 'reflections', label: 'Reflect', icon: Sparkles },
+                      { id: 'fleet', label: 'Safety', icon: ShieldAlert },
                   ].map(tab => (
                       <button 
                         key={tab.id}
                         onClick={() => setActiveTab(tab.id as any)}
-                        className={`flex-1 min-w-[50px] flex flex-col items-center justify-center gap-1 py-3 px-1 text-[9px] font-bold uppercase tracking-wider transition-all border-t-2 ${activeTab === tab.id ? 'border-primary bg-surface text-white' : 'border-transparent text-textTertiary hover:text-textSecondary hover:bg-white/5'}`}
+                        className={`
+                            group flex items-center justify-center gap-1.5 px-3 py-2 text-[10px] font-bold uppercase tracking-wider transition-all h-10 mb-[-1px] rounded-t-md border-t border-l border-r min-w-fit
+                            ${activeTab === tab.id 
+                                ? 'bg-surface text-primary border-border border-b-transparent relative z-10 shadow-[0_-2px_4px_rgba(0,0,0,0.02)]' 
+                                : 'bg-transparent text-textTertiary hover:text-textPrimary hover:bg-background border-transparent'}
+                        `}
                       >
-                          <tab.icon size={14} className={activeTab === tab.id ? 'text-primary' : 'opacity-50'} /> 
-                          <span className="scale-90 whitespace-nowrap">{tab.label}</span>
+                          <tab.icon size={13} className={activeTab === tab.id ? 'text-primary' : 'opacity-70'} /> 
+                          <span className="whitespace-nowrap">{tab.label}</span>
                       </button>
                   ))}
+              </div>
+              <div className="flex items-center gap-1 pl-2">
+                  <button 
+                      onClick={() => generateReportPDF('Full')} 
+                      className="flex items-center gap-2 px-4 py-1.5 bg-primary hover:bg-primaryHover text-white rounded-lg text-[10px] font-bold uppercase tracking-wider mr-2 transition-all shadow-md hover:shadow-glow transform hover:-translate-y-0.5"
+                      title="Download Full Master Dossier"
+                  >
+                      <FileDown size={14} /> Export Case
+                  </button>
+                  <button onClick={() => setIsPanelCollapsed(true)} className="p-2 text-textTertiary hover:text-textPrimary"><PanelRightClose size={16} /></button>
               </div>
           </div>
 
           {/* Content Area */}
-          <div className="flex-1 overflow-y-auto custom-scrollbar p-5 bg-[#0e0e12]">
+          <div className="flex-1 overflow-y-auto custom-scrollbar p-6 bg-surface">
               
-              {/* REASONING STREAM TAB (FORMERLY LOG) */}
-              {activeTab === 'log' && (
-                  <div className="space-y-4" ref={logRef}>
-                      {/* ... (Log content unchanged) ... */}
-                      <div className="flex items-center justify-between mb-2">
-                        <h4 className="text-[10px] font-bold text-textTertiary uppercase flex items-center gap-2">
-                           <Activity size={12} className={!analysis ? "text-primary animate-pulse" : "text-emerald-500"}/> 
-                           {analysis ? "Forensic Trace Complete" : "Live Reasoning Stream"}
-                        </h4>
-                        {!analysis && <span className="flex items-center gap-1 text-[9px] text-primary font-mono"><Loader2 size={10} className="animate-spin"/> PROCESSING</span>}
+              {/* REPORTS GENERATION TAB */}
+              {activeTab === 'reports' && (
+                  <div className="space-y-6 animate-fade-in">
+                      <div className="grid grid-cols-1 gap-4">
+                          {[
+                              { id: 'Summary', title: 'Executive Summary', icon: FileText, desc: 'High-level overview covering facts, fault, and key evidence.', color: 'text-blue-600 bg-blue-50 border-blue-100' },
+                              { id: 'Technical', title: 'Technical Reconstruction', icon: Activity, desc: 'Detailed physics analysis, speed calculations, and environmental data.', color: 'text-indigo-600 bg-indigo-50 border-indigo-100' },
+                              { id: 'Insurance', title: 'Insurance Claim Form', icon: FileCheck, desc: 'Standardized liability breakdown, party details, and damage assessment.', color: 'text-emerald-600 bg-emerald-50 border-emerald-100' },
+                              { id: 'Legal', title: 'Legal Brief', icon: Scale, desc: 'Formal argumentation, rule citations, and chain of custody verification.', color: 'text-slate-700 bg-slate-50 border-slate-200' },
+                          ].map((report) => (
+                              <div key={report.id} className="bg-surface border border-border rounded-xl p-5 shadow-card hover:shadow-soft transition-all flex items-center justify-between group">
+                                  <div className="flex items-center gap-4">
+                                      <div className={`w-12 h-12 rounded-lg flex items-center justify-center ${report.color}`}>
+                                          <report.icon size={24} />
+                                      </div>
+                                      <div>
+                                          <h4 className="text-sm font-bold text-textPrimary mb-1">{report.title}</h4>
+                                          <p className="text-[11px] text-textSecondary max-w-[280px] leading-snug font-mono">{report.desc}</p>
+                                          <div className="flex items-center gap-1 mt-2 text-[10px] font-bold text-textTertiary uppercase tracking-wider">
+                                              <span className="w-1.5 h-1.5 rounded-full bg-success"></span> Ready to export
+                                          </div>
+                                      </div>
+                                  </div>
+                                  <div className="flex flex-col gap-2">
+                                      <button 
+                                        onClick={() => generateReportPDF(report.id as any)}
+                                        disabled={isGeneratingReport}
+                                        className="flex items-center gap-2 px-4 py-2 bg-background border border-border hover:border-primary/50 hover:text-primary rounded-lg text-xs font-bold text-textSecondary transition-colors shadow-sm disabled:opacity-50"
+                                      >
+                                          {isGeneratingReport ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14}/>}
+                                          {isGeneratingReport ? 'Processing' : 'PDF'}
+                                      </button>
+                                  </div>
+                              </div>
+                          ))}
                       </div>
+                      {isGeneratingReport && (
+                          <div className="p-4 bg-primaryLight/20 border border-primaryLight rounded-xl flex items-center gap-3 animate-fade-in">
+                              <Loader2 className="animate-spin text-primary" size={20} />
+                              <div>
+                                  <h4 className="text-xs font-bold text-primary">Generating Professional Report</h4>
+                                  <p className="text-[10px] text-textSecondary font-mono">{reportProgress}</p>
+                              </div>
+                          </div>
+                      )}
+                  </div>
+              )}
 
-                      <div className="p-4 bg-[#0a0a0f] border border-white/5 rounded-lg shadow-inner min-h-[500px]">
+              {/* CHAT TAB */}
+              {activeTab === 'chat' && (
+                  <div className="flex flex-col h-full">
+                      <div className="flex-1 overflow-y-auto custom-scrollbar space-y-4 p-4 mb-4 bg-background border border-border rounded-xl" ref={chatRef}>
+                          {chatHistory.length === 0 && (
+                              <div className="flex flex-col items-center justify-center h-full text-center opacity-50">
+                                  <MessageSquare size={48} className="text-textTertiary mb-2" />
+                                  <p className="text-xs text-textSecondary">Ask the Investigator AI about specific details<br/>or hypothetical scenarios.</p>
+                              </div>
+                          )}
+                          {chatHistory.map((msg, idx) => (
+                              <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                  <div className={`max-w-[85%] rounded-xl p-4 text-xs leading-relaxed shadow-sm transition-all ${msg.role === 'user' ? 'bg-primary text-white rounded-tr-none' : 'bg-surface border border-border rounded-tl-none'}`}>
+                                      {msg.role === 'user' ? (
+                                          <p>{msg.text}</p>
+                                      ) : (
+                                          <FormattedMarkdown text={msg.text} onSeek={handleSeek} className="prose-sm" />
+                                      )}
+                                  </div>
+                              </div>
+                          ))}
+                          {isChatting && (
+                              <div className="flex justify-start">
+                                  <div className="bg-surface border border-border rounded-xl p-3 rounded-tl-none shadow-sm flex gap-2 items-center">
+                                      <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{animationDelay: '0s'}}></div>
+                                      <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+                                      <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{animationDelay: '0.4s'}}></div>
+                                  </div>
+                              </div>
+                          )}
+                      </div>
+                      <div className="flex gap-2">
+                          <input 
+                            value={chatInput} 
+                            onChange={(e) => setChatInput(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && handleChat()}
+                            placeholder="Ask a question about the incident..." 
+                            className="flex-1 bg-surface border border-border rounded-lg px-4 py-3 text-xs focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-all shadow-sm" 
+                          />
+                          <button onClick={handleChat} disabled={isChatting || !chatInput} className="bg-primary text-white px-4 rounded-lg hover:bg-primaryHover disabled:opacity-50 transition-colors shadow-sm">
+                              <ChevronRight size={18} />
+                          </button>
+                      </div>
+                  </div>
+              )}
+
+              {/* REASONING STREAM TAB */}
+              {activeTab === 'log' && (
+                  <div className="space-y-4 h-full flex flex-col" ref={logRef}>
+                      <div className="flex items-center justify-between mb-2 shrink-0">
+                        <h4 className="text-[10px] font-bold text-textSecondary uppercase flex items-center gap-2 font-mono tracking-widest">
+                           <Activity size={12} className={!analysis ? "text-primary animate-pulse" : "text-success"}/> 
+                           {analysis ? "FORENSIC TRACE LOG" : "LIVE ANALYSIS STREAM"}
+                        </h4>
+                        {!analysis && <span className="flex items-center gap-1.5 text-[9px] text-primary font-mono bg-primaryLight/50 px-2 py-0.5 rounded border border-primaryLight"><Loader2 size={10} className="animate-spin"/> PROCESSING</span>}
+                      </div>
+                      <div className="flex-1 p-5 bg-background border border-border rounded-xl shadow-inner font-mono text-xs overflow-y-auto custom-scrollbar relative">
                          <ReasoningLogRenderer text={contentToRender || "Initializing Neural Forensics Engine..."} onSeek={handleSeek} />
                       </div>
                   </div>
               )}
-
-              {/* NARRATIVE TAB (NEW) */}
-              {activeTab === 'narrative' && analysis && (
-                  <div className="space-y-6 animate-fade-in">
-                      <div className="bg-surface border border-white/10 rounded-xl p-6 relative overflow-hidden">
-                          <div className="absolute top-0 right-0 p-3 opacity-5 text-primary"><BookOpen size={100}/></div>
-                          
-                          <div className="flex items-center justify-between mb-6 border-b border-white/5 pb-4">
-                              <h4 className="text-[10px] font-bold text-textTertiary uppercase flex items-center gap-2">
-                                  <Scale size={12} className="text-primary"/> Formal Chain of Events
-                              </h4>
-                              <span className="text-[9px] font-mono text-gray-500 bg-white/5 px-2 py-1 rounded">LEGAL FORMAT</span>
-                          </div>
-
-                          <div className="prose prose-invert prose-sm max-w-none text-xs leading-relaxed text-gray-300 font-serif">
-                              {/* Using TextWithTimestamps to make times interactive within the narrative */}
-                              <div className="whitespace-pre-line">
-                                  <TextWithTimestamps text={analysis.chainOfEvents || "Narrative generation pending..."} onSeek={handleSeek} />
-                              </div>
-                          </div>
-
-                          <div className="mt-8 pt-4 border-t border-white/10 flex justify-end">
-                              <button 
-                                onClick={() => handleExport('Legal Brief')}
-                                className="flex items-center gap-2 px-4 py-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-lg text-xs font-bold transition-colors"
-                              >
-                                  <FileText size={14}/> Export to PDF
-                              </button>
-                          </div>
-                      </div>
-                  </div>
-              )}
-
-              {/* AUTHENTICITY TAB (NEW) */}
+              {/* AUTHENTICITY TAB */}
               {activeTab === 'authenticity' && analysis?.authenticity && (
                   <div className="space-y-6 animate-fade-in">
-                      {/* Authenticity Score Card */}
-                      <div className="bg-surface border border-white/10 rounded-xl p-5 relative overflow-hidden text-center">
-                          <div className="absolute top-0 right-0 p-3 opacity-5 text-emerald-500"><Lock size={120}/></div>
-                          <div className="relative z-10 flex flex-col items-center">
-                              <div className="text-[10px] font-bold text-textTertiary uppercase mb-2 tracking-widest">Video Integrity Score</div>
-                              <div className="text-5xl font-mono font-bold text-white mb-1 tracking-tight">
-                                  {analysis.authenticity.integrityScore}
-                              </div>
-                              <div className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
-                                  analysis.authenticity.overallAssessment === 'Verified Authentic' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
-                                  analysis.authenticity.overallAssessment === 'Suspect' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
-                                  'bg-rose-500/20 text-rose-400 border border-rose-500/30'
-                              }`}>
-                                  {analysis.authenticity.overallAssessment}
-                              </div>
+                      <div className={`p-6 rounded-xl border flex flex-col items-center justify-center text-center space-y-3 ${analysis.authenticity.overallAssessment === 'Verified Authentic' ? 'bg-emerald-50 border-emerald-100' : 'bg-rose-50 border-rose-100'}`}>
+                          <div className={`w-16 h-16 rounded-full flex items-center justify-center ${analysis.authenticity.overallAssessment === 'Verified Authentic' ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}`}>
+                             {analysis.authenticity.overallAssessment === 'Verified Authentic' ? <CheckCircle2 size={32}/> : <AlertOctagon size={32}/>}
+                          </div>
+                          <div>
+                              <div className="text-2xl font-bold text-textPrimary">{analysis.authenticity.integrityScore}/100</div>
+                              <div className="text-xs font-bold uppercase tracking-widest text-textSecondary">{analysis.authenticity.overallAssessment}</div>
                           </div>
                       </div>
-
-                      {/* Summary Analysis */}
-                      <div className="p-4 bg-surfaceHighlight/20 rounded border border-white/5">
-                          <h4 className="text-[10px] font-bold text-textTertiary uppercase mb-2 flex items-center gap-2">
-                              <FileCheck size={12}/> Chain of Custody Audit
-                          </h4>
-                          <p className="text-xs text-gray-300 leading-relaxed italic border-l-2 border-primary/50 pl-3">
-                              "{analysis.authenticity.summary}"
-                          </p>
-                      </div>
-
-                      {/* Consistency Checks */}
                       <div className="space-y-3">
-                          <h4 className="text-[10px] font-bold text-textTertiary uppercase">Forensic Consistency Checks</h4>
-                          {[
-                              { label: 'Temporal Continuity', data: analysis.authenticity.temporalContinuity, icon: Clock },
-                              { label: 'Technical Integrity', data: analysis.authenticity.technicalConsistency, icon: Activity },
-                              { label: 'Physical Logic', data: analysis.authenticity.physicalConsistency, icon: Zap },
-                              { label: 'Metadata Layer', data: analysis.authenticity.metadataAnalysis, icon: Database },
-                          ].map((check, i) => (
-                              <div key={i} className="bg-surfaceHighlight/20 border border-white/5 rounded-lg p-3">
-                                  <div className="flex justify-between items-center mb-2">
-                                      <div className="flex items-center gap-2">
-                                          <check.icon size={14} className="text-textTertiary"/>
-                                          <span className="text-xs font-bold text-white">{check.label}</span>
-                                      </div>
-                                      <div className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${
-                                          check.data.status === 'Pass' ? 'text-emerald-400 bg-emerald-400/10' :
-                                          check.data.status === 'Fail' ? 'text-rose-400 bg-rose-400/10' :
-                                          'text-gray-400 bg-gray-500/10'
-                                      }`}>{check.data.status}</div>
-                                  </div>
-                                  <p className="text-[10px] text-gray-400 mb-2 pl-6">{check.data.observation}</p>
-                                  {check.data.anomalies && check.data.anomalies.length > 0 && (
-                                      <div className="pl-6 space-y-1">
-                                          {check.data.anomalies.map((anomaly, k) => (
-                                              <div key={k} className="flex items-center gap-1.5 text-[9px] text-rose-300">
-                                                  <AlertTriangle size={10}/> {anomaly}
-                                              </div>
-                                          ))}
-                                      </div>
-                                  )}
+                          <h4 className="text-[10px] font-bold text-textTertiary uppercase font-mono tracking-wider">Chain of Custody Checks</h4>
+                          {[ { label: "Temporal Continuity", data: analysis.authenticity.temporalContinuity }, { label: "Technical Consistency", data: analysis.authenticity.technicalConsistency }, { label: "Physical Consistency", data: analysis.authenticity.physicalConsistency }, { label: "Metadata Analysis", data: analysis.authenticity.metadataAnalysis }, ].map((check, i) => (
+                              <div key={i} className="flex justify-between items-center p-3 bg-surface border border-border rounded-lg shadow-sm">
+                                  <div> <div className="text-xs font-bold text-textPrimary">{check.label}</div> <div className="text-[10px] text-textSecondary">{check.data?.observation || 'Pending...'}</div> </div>
+                                  <div className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${check.data?.status === 'Pass' ? 'bg-emerald-50 text-emerald-700' : check.data?.status === 'Fail' ? 'bg-rose-50 text-rose-700' : 'bg-slate-100 text-slate-500'}`}> {check.data?.status || 'N/A'} </div>
                               </div>
                           ))}
                       </div>
                   </div>
               )}
-
-              {/* DAMAGE ANALYSIS TAB (NEW) */}
-              {activeTab === 'damage' && analysis?.damageAnalysis && (
+              
+              {/* ENTITIES TAB */}
+              {activeTab === 'entities' && ensureArray(analysis?.entities).length > 0 ? (
                   <div className="space-y-6 animate-fade-in">
-                      {/* Validation Status */}
-                      <div className={`p-4 rounded-xl border flex items-center justify-between ${
-                          analysis.damageAnalysis.validationConclusion.isConsistent ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-rose-500/10 border-rose-500/30'
-                      }`}>
-                          <div className="flex items-center gap-3">
-                              <div className={`p-2 rounded-full ${analysis.damageAnalysis.validationConclusion.isConsistent ? 'bg-emerald-500 text-white' : 'bg-rose-500 text-white'}`}>
-                                  {analysis.damageAnalysis.validationConclusion.isConsistent ? <CheckCircle2 size={20}/> : <ShieldAlert size={20}/>}
-                              </div>
-                              <div>
-                                  <h4 className={`text-sm font-bold ${analysis.damageAnalysis.validationConclusion.isConsistent ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                      {analysis.damageAnalysis.validationConclusion.isConsistent ? 'Physics Model Validated' : 'Physics Model Discrepancy'}
-                                  </h4>
-                                  <p className="text-[10px] text-textSecondary">{analysis.damageAnalysis.validationConclusion.reasoning}</p>
-                              </div>
-                          </div>
-                          <ConfidenceBadge level={analysis.damageAnalysis.validationConclusion.confidence} />
-                      </div>
-
-                      {/* Physics Core */}
-                      <div className="bg-surface border border-white/10 rounded-xl p-5 relative overflow-hidden">
-                          <div className="absolute top-0 right-0 p-3 opacity-10 text-primary"><Zap size={100}/></div>
-                          <h4 className="text-[10px] font-bold text-textTertiary uppercase mb-4 flex items-center gap-2">
-                              <Activity size={12}/> Impact Energy Profile
-                          </h4>
-                          
-                          <div className="grid grid-cols-2 gap-4">
-                              <div className="bg-black/20 p-3 rounded border border-white/5">
-                                  <div className="text-[9px] text-textTertiary uppercase mb-1">Kinetic Energy</div>
-                                  <div className="text-xl font-mono font-bold text-white">{(analysis.damageAnalysis.physics.kineticEnergyJoule / 1000).toFixed(1)} <span className="text-sm text-textTertiary">kJ</span></div>
-                              </div>
-                              <div className="bg-black/20 p-3 rounded border border-white/5">
-                                  <div className="text-[9px] text-textTertiary uppercase mb-1">Impact Vector</div>
-                                  <div className="text-sm font-bold text-white">{analysis.damageAnalysis.physics.forceVector}</div>
-                              </div>
-                          </div>
-                          <div className="mt-4 p-3 bg-primary/10 border border-primary/20 rounded text-[10px] text-primary/80">
-                              <span className="font-bold uppercase text-primary mr-2">Predicted Deformation:</span>
-                              {analysis.damageAnalysis.physics.predictedCrumpleDepth}
-                          </div>
-                      </div>
-
-                      {/* Zone Comparison */}
-                      <div className="space-y-3">
-                          <h4 className="text-[10px] font-bold text-textTertiary uppercase">Predicted vs. Observed Damage</h4>
-                          {(analysis.damageAnalysis.zones || []).map((zone, i) => (
-                              <div key={i} className="bg-surfaceHighlight/20 border border-white/5 rounded-lg p-3">
-                                  <div className="flex justify-between items-start mb-2">
-                                      <div className="flex items-center gap-2">
-                                          <Car size={14} className="text-textTertiary"/>
-                                          <span className="text-xs font-bold text-white">{zone.vehicleId} - {zone.zone}</span>
-                                      </div>
-                                      <div className={`text-[9px] px-2 py-0.5 rounded font-bold uppercase ${
-                                          zone.matchStatus === 'Consistent' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
-                                      }`}>{zone.matchStatus}</div>
+                      <div className="grid grid-cols-1 gap-4">
+                          {ensureArray(analysis?.entities).map((entity, i) => (
+                              <div key={i} className="flex items-center gap-4 p-4 bg-surface border border-border rounded-xl shadow-card hover:shadow-soft transition-all">
+                                  <div className="w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-sm" style={{backgroundColor: entity.color || '#64748b'}}> {entity.id.substring(0, 2)} </div>
+                                  <div className="flex-1">
+                                      <div className="flex justify-between items-start"> <h4 className="text-sm font-bold text-textPrimary">{entity.id}</h4> <span className="text-[10px] bg-background text-textSecondary px-2 py-0.5 rounded-full border border-border uppercase font-bold tracking-wider">{entity.type}</span> </div>
+                                      <p className="text-xs text-textSecondary mt-1">{entity.description}</p>
                                   </div>
-                                  
-                                  <div className="grid grid-cols-2 gap-4 text-[10px] mb-2">
-                                      <div>
-                                          <div className="text-textTertiary uppercase text-[8px] mb-0.5">Physics Prediction</div>
-                                          <div className="font-bold text-primary">{zone.predictedSeverity}</div>
-                                      </div>
-                                      <div>
-                                          <div className="text-textTertiary uppercase text-[8px] mb-0.5">Visual Observation</div>
-                                          <div className="font-bold text-white">{zone.observedSeverity}</div>
-                                      </div>
-                                  </div>
-                                  <p className="text-[9px] text-gray-400 border-t border-white/5 pt-2 mt-1">{zone.notes}</p>
                               </div>
                           ))}
                       </div>
-
-                      {/* Secondary Outcomes */}
-                      <div>
-                          <h4 className="text-[10px] font-bold text-textTertiary uppercase mb-3">Secondary Damage Indicators</h4>
-                          <div className="grid grid-cols-1 gap-2">
-                              <div className="flex justify-between items-center p-3 bg-surface border border-white/5 rounded">
-                                  <span className="text-[10px] text-textSecondary">Airbag Deployment</span>
-                                  <span className={`text-[10px] font-bold ${analysis.damageAnalysis.secondaryOutcomes.airbagDeployment === 'Predicted' ? 'text-danger' : 'text-gray-400'}`}>
-                                      {analysis.damageAnalysis.secondaryOutcomes.airbagDeployment}
-                                  </span>
-                              </div>
-                              <div className="flex justify-between items-center p-3 bg-surface border border-white/5 rounded">
-                                  <span className="text-[10px] text-textSecondary">Glass Integrity</span>
-                                  <span className="text-[10px] font-bold text-white text-right w-1/2 truncate">
-                                      {analysis.damageAnalysis.secondaryOutcomes.glassBreakage}
-                                  </span>
-                              </div>
+                  </div>
+              ) : activeTab === 'entities' && <EmptyAnalysisState title="Entity Tracking" icon={User} />}
+              
+              {/* NARRATIVE TAB - ENHANCED */}
+              {activeTab === 'narrative' && analysis && (
+                  <div className="space-y-6 animate-fade-in">
+                      <div className="bg-surface border border-border rounded-xl p-8 relative overflow-hidden shadow-card">
+                          <div className="flex items-center justify-between mb-8 border-b border-border pb-4">
+                              <h4 className="text-[10px] font-bold text-textSecondary uppercase flex items-center gap-2 font-mono tracking-widest"> <Scale size={14} className="text-primary"/> Formal Chain of Events </h4>
+                              <span className="text-[9px] font-mono text-textSecondary bg-background px-2 py-1 rounded border border-border">LEGAL FORMAT</span>
+                          </div>
+                          <div className="prose prose-sm max-w-none text-textPrimary font-serif pl-2 leading-relaxed">
+                              <FormattedMarkdown text={analysis.chainOfEvents || "Narrative generation pending..."} onSeek={handleSeek} className="space-y-4" />
                           </div>
                       </div>
                   </div>
               )}
-
-              {/* ... (Other tabs: scene, signals... unchanged) ... */}
+              {/* SCENE (ENVIRONMENTAL) TAB */}
               {activeTab === 'scene' && analysis?.environmental && (
                   <div className="space-y-6 animate-fade-in">
-                      {/* Weather Card */}
-                      <div className="bg-surface border border-white/10 rounded-xl p-5 relative overflow-hidden">
-                          <div className="absolute top-0 right-0 p-3 opacity-10 text-cyan-500"><Cloud size={80}/></div>
-                          <h4 className="text-[10px] font-bold text-textTertiary uppercase mb-4 flex items-center gap-2">
-                              <Cloud size={12} className="text-cyan-500"/> Environmental Context
-                          </h4>
-                          
+                      <div className="bg-background border border-border rounded-xl p-6 relative overflow-hidden">
+                          <div className="absolute top-0 right-0 p-4 opacity-5 text-primary"><Cloud size={80}/></div>
+                          <h4 className="text-[10px] font-bold text-textSecondary uppercase mb-4 flex items-center gap-2 font-mono tracking-widest"> <Cloud size={14} className="text-primary"/> Environmental Context </h4>
                           <div className="grid grid-cols-2 gap-4">
-                              <div className="p-3 bg-surfaceHighlight/20 rounded border border-white/5">
-                                  <div className="text-[9px] text-textTertiary uppercase mb-1">Weather Condition</div>
-                                  <div className="text-sm font-bold text-white">{analysis.environmental.weather.condition}</div>
-                              </div>
-                              <div className="p-3 bg-surfaceHighlight/20 rounded border border-white/5">
-                                  <div className="text-[9px] text-textTertiary uppercase mb-1">Visibility</div>
-                                  <div className="text-sm font-bold text-white">{analysis.environmental.weather.visibility}</div>
-                              </div>
-                              <div className="p-3 bg-surfaceHighlight/20 rounded border border-white/5">
-                                  <div className="text-[9px] text-textTertiary uppercase mb-1">Road Surface</div>
-                                  <div className="text-sm font-bold text-white flex items-center gap-2">
-                                      {analysis.environmental.road.condition}
-                                      {analysis.environmental.road.condition.toLowerCase().includes('wet') && <Sparkles size={10} className="text-cyan-400"/>}
-                                  </div>
-                              </div>
-                              <div className="p-3 bg-surfaceHighlight/20 rounded border border-white/5">
-                                  <div className="text-[9px] text-textTertiary uppercase mb-1">Lighting</div>
-                                  <div className="text-sm font-bold text-white">{analysis.environmental.lighting}</div>
-                              </div>
+                              <div className="p-4 bg-surface rounded-lg border border-border shadow-sm"> <div className="text-[9px] text-textTertiary uppercase mb-1 font-mono">Weather</div> <div className="text-sm font-bold text-textPrimary font-sans">{analysis.environmental.weather?.condition || "N/A"}</div> </div>
+                              <div className="p-4 bg-surface rounded-lg border border-border shadow-sm"> <div className="text-[9px] text-textTertiary uppercase mb-1 font-mono">Visibility</div> <div className="text-sm font-bold text-textPrimary font-sans">{analysis.environmental.weather?.visibility || "N/A"}</div> </div>
+                              <div className="p-4 bg-surface rounded-lg border border-border shadow-sm"> <div className="text-[9px] text-textTertiary uppercase mb-1 font-mono">Road Surface</div> <div className="text-sm font-bold text-textPrimary flex items-center gap-2 font-sans"> {analysis.environmental.road?.condition || "N/A"} {analysis.environmental.road?.condition?.toLowerCase().includes('wet') && <Droplets size={12} className="text-primary"/>} </div> </div>
+                              <div className="p-4 bg-surface rounded-lg border border-border shadow-sm"> <div className="text-[9px] text-textTertiary uppercase mb-1 font-mono">Lighting</div> <div className="text-sm font-bold text-textPrimary font-sans">{analysis.environmental.lighting || "N/A"}</div> </div>
                           </div>
                       </div>
-
-                      {/* Traffic Control Inventory */}
                       <div>
-                          <h4 className="text-[10px] font-bold text-textTertiary uppercase mb-3 flex items-center gap-2">
-                              <Signpost size={12} /> Infrastructure Inventory
-                          </h4>
+                          <h4 className="text-[10px] font-bold text-textSecondary uppercase mb-3 flex items-center gap-2 font-mono tracking-widest"> <AlertTriangle size={14} className="text-warning"/> Environmental Hazards </h4>
                           <div className="space-y-3">
-                              {(analysis.environmental.trafficControls || []).map((tc, i) => (
-                                  <div key={i} className="flex gap-4 p-3 bg-surface border border-white/5 hover:border-primary/40 rounded-lg group transition-colors cursor-pointer" onClick={() => {
-                                      const match = tc.detectedAt.match(/(\d{1,2}):(\d{2})(?:\.(\d+))?/);
-                                      if (match) {
-                                          const sec = parseInt(match[1]) * 60 + parseInt(match[2]) + (match[3] ? parseFloat(`0.${match[3]}`) : 0);
-                                          handleSeek(sec);
-                                      }
-                                  }}>
-                                      <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 border border-white/5 ${
-                                          tc.relevance === 'Critical' ? 'bg-danger/10 text-danger border-danger/20' : 'bg-surfaceHighlight text-gray-400'
-                                      }`}>
-                                          <Grip size={18} />
-                                      </div>
-                                      <div className="flex-1 min-w-0">
-                                          <div className="flex justify-between items-center mb-1">
-                                              <span className="text-xs font-bold text-white">{tc.type}</span>
-                                              <span className="text-[10px] font-mono text-primary bg-primary/10 px-1.5 rounded">{tc.detectedAt}</span>
-                                          </div>
-                                          <div className="text-[10px] text-gray-300">
-                                              <span className="text-gray-500">State:</span> <span className="font-bold">{tc.state}</span>
-                                          </div>
-                                          <div className="text-[9px] text-textTertiary mt-0.5">{tc.location}</div>
-                                      </div>
+                              {ensureArray(analysis.environmental.hazards).map((haz, i) => (
+                                  <div key={i} className="flex bg-surface border border-border rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-all">
+                                      <div className={`w-12 flex items-center justify-center ${ haz.severity === 'Critical' ? 'bg-rose-50 text-danger' : 'bg-amber-50 text-warning' }`}> <AlertTriangle size={18}/> </div>
+                                      <div className="p-3 flex-1"> <div className="flex justify-between items-start mb-1"> <span className="text-xs font-bold text-textPrimary font-mono">{haz.category}</span> <span className={`text-[9px] px-2 py-0.5 rounded font-bold uppercase ${ haz.severity === 'Critical' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700' }`}>{haz.contribution}</span> </div> <p className="text-sm text-textSecondary leading-snug font-sans">{haz.description}</p> </div>
                                   </div>
                               ))}
-                              {(!analysis.environmental.trafficControls || analysis.environmental.trafficControls.length === 0) && (
-                                  <div className="text-center py-6 text-xs text-gray-500 italic border border-dashed border-white/10 rounded-lg">
-                                      No traffic control devices detected in this sequence.
-                                  </div>
-                              )}
                           </div>
                       </div>
                   </div>
               )}
-
-              {/* HAZARDS TAB (NEW) */}
-              {activeTab === 'hazards' && analysis?.environmental && (
+              {/* DAMAGE TAB */}
+              {activeTab === 'damage' && analysis?.damageAnalysis && (
                   <div className="space-y-6 animate-fade-in">
-                      {/* Summary Banner */}
-                      <div className="p-4 bg-surfaceHighlight/20 border-l-2 border-danger rounded-r-lg">
-                          <h4 className="text-[10px] font-bold text-danger uppercase mb-1">Safety Audit Conclusion</h4>
-                          <p className="text-xs text-gray-300 leading-relaxed">
-                              Identified {(analysis.environmental.hazards || []).length} contributing environmental factors that may mitigate driver liability.
-                          </p>
+                      <div className={`p-4 rounded-xl border flex items-center justify-between ${analysis.damageAnalysis.validationConclusion?.isConsistent ? 'bg-emerald-50 border-emerald-100' : 'bg-rose-50 border-rose-100'}`}>
+                          <div className="flex items-center gap-4">
+                              <div className={`p-2 rounded-full ${analysis.damageAnalysis.validationConclusion?.isConsistent ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}`}> {analysis.damageAnalysis.validationConclusion?.isConsistent ? <CheckCircle2 size={24}/> : <ShieldAlert size={24}/>} </div>
+                              <div> <h4 className={`text-sm font-bold ${analysis.damageAnalysis.validationConclusion?.isConsistent ? 'text-emerald-800' : 'text-rose-800'}`}> {analysis.damageAnalysis.validationConclusion?.isConsistent ? 'Physics Model Validated' : 'Physics Model Discrepancy'} </h4> <p className="text-[10px] text-textSecondary font-mono mt-1">{analysis.damageAnalysis.validationConclusion?.reasoning}</p> </div>
+                          </div>
                       </div>
-
-                      {/* Hazard Grid */}
-                      <div className="grid grid-cols-1 gap-4">
-                          {(analysis.environmental.hazards || []).map((haz, i) => (
-                              <div key={i} className="bg-surface border border-white/10 rounded-xl overflow-hidden shadow-lg group hover:border-danger/30 transition-all">
-                                  <div className="flex">
-                                      {/* Icon Column */}
-                                      <div className={`w-16 flex flex-col items-center justify-center p-2 border-r border-white/5 ${
-                                          haz.severity === 'Critical' ? 'bg-danger/10 text-danger' : 
-                                          haz.severity === 'Moderate' ? 'bg-warning/10 text-warning' : 'bg-surfaceHighlight text-gray-400'
-                                      }`}>
-                                          {haz.category === 'Road Surface' ? <Droplets size={24} /> :
-                                           haz.category === 'Visibility' ? <EyeOff size={24} /> :
-                                           haz.category === 'Infrastructure' ? <Construction size={24} /> :
-                                           haz.category === 'Obstruction' ? <TreeDeciduous size={24} /> :
-                                           <AlertTriangle size={24} />}
-                                          <div className="text-[8px] font-bold uppercase mt-2 tracking-wider text-center">{haz.severity}</div>
+                      <div className="bg-background border border-border rounded-xl p-6 relative overflow-hidden">
+                          <h4 className="text-[10px] font-bold text-textSecondary uppercase mb-6 flex items-center gap-2 font-mono tracking-widest"> <Activity size={12}/> Impact Energy Profile </h4>
+                          <div className="grid grid-cols-2 gap-4">
+                              <div className="bg-surface p-4 rounded-lg border border-border shadow-sm"> <div className="text-[9px] text-textTertiary uppercase mb-1 font-mono">Kinetic Energy</div> <div className="text-2xl font-mono font-bold text-textPrimary tracking-tighter">{(analysis.damageAnalysis.physics?.kineticEnergyJoule / 1000).toFixed(1)} <span className="text-sm text-textSecondary">kJ</span></div> </div>
+                              <div className="bg-surface p-4 rounded-lg border border-border shadow-sm"> <div className="text-[9px] text-textTertiary uppercase mb-1 font-mono">Impact Vector</div> <div className="text-sm font-bold text-textPrimary font-mono mt-1">{analysis.damageAnalysis.physics?.forceVector}</div> </div>
+                          </div>
+                      </div>
+                  </div>
+              )}
+              {/* VEHICLE IDENTIFICATION TAB */}
+              {activeTab === 'vehicles' && analysis?.vehicleAnalysis && (
+                  <div className="space-y-6 animate-fade-in">
+                      <div className="p-4 bg-background rounded-lg border border-border shadow-sm"> <h4 className="text-[10px] font-bold text-textSecondary uppercase mb-2 font-mono">Fleet Identification Summary</h4> <p className="text-xs text-textSecondary leading-relaxed italic border-l-2 border-primary/50 pl-3 font-serif"> "{analysis.vehicleAnalysis.summary}" </p> </div>
+                      <div className="space-y-6">
+                          {ensureArray(analysis.vehicleAnalysis.vehicles).map((veh, i) => (
+                              <div key={i} className="bg-surface border border-border rounded-xl overflow-hidden shadow-card">
+                                  <div className="bg-background border-b border-border p-4 flex justify-between items-center"> <div className="flex items-center gap-3"> <div className="w-10 h-10 rounded-full bg-primaryLight flex items-center justify-center text-primary border border-primary/20"> <Car size={20} /> </div> <div> <div className="text-sm font-bold text-textPrimary">{veh.make} {veh.model}</div> <div className="text-[10px] text-textSecondary uppercase font-mono">{veh.yearRange} {veh.trimLevel}</div> </div> </div> <ConfidenceBadge level={veh.confidence} /> </div>
+                                  <div className="p-6 relative bg-surface">
+                                      <div className="absolute inset-0 bg-grid-pattern opacity-60 pointer-events-none"></div>
+                                      <div className="relative border border-borderStrong rounded-lg p-8 flex items-center justify-center min-h-[160px] bg-background">
+                                          <div className="w-48 h-24 border-2 border-textSecondary rounded-lg relative flex items-center justify-center bg-surface shadow-sm"> <div className="text-[10px] font-mono text-textTertiary uppercase tracking-widest">Chassis: {veh.entityId}</div> <div className="absolute -bottom-6 left-0 right-0 h-4 border-l border-r border-b border-textSecondary flex items-center justify-center"> <span className="absolute top-full mt-1 text-[9px] font-mono text-textSecondary bg-surface px-1 border border-border rounded">L: {veh.specs?.length || "N/A"}</span> </div> <div className="absolute bottom-2 left-8 right-8 h-2 border-b border-dashed border-textSecondary flex items-center justify-center"> <span className="absolute top-full mt-0.5 text-[8px] font-mono text-textTertiary">WB: {veh.specs?.wheelbase || "N/A"}</span> </div> <div className="absolute -right-6 top-0 bottom-0 w-4 border-t border-b border-r border-textSecondary flex items-center justify-center"> <span className="absolute left-full ml-1 text-[9px] font-mono text-textSecondary bg-surface px-1 border border-border rounded whitespace-nowrap" style={{writingMode: 'vertical-rl'}}>H: {veh.specs?.height || "N/A"}</span> </div> </div>
                                       </div>
-
-                                      {/* Content */}
-                                      <div className="flex-1 p-4">
-                                          <div className="flex justify-between items-start mb-2">
-                                              <span className="text-xs font-bold text-white uppercase tracking-wide">{haz.category}</span>
-                                              <span className={`text-[9px] px-2 py-0.5 rounded font-bold uppercase ${
-                                                  haz.contribution === 'Primary Cause' ? 'bg-danger text-white' :
-                                                  haz.contribution === 'Contributing Factor' ? 'bg-warning/20 text-warning' :
-                                                  'bg-white/5 text-gray-500'
-                                              }`}>{haz.contribution}</span>
-                                          </div>
-                                          
-                                          <p className="text-sm text-gray-200 font-medium mb-3 leading-snug">
-                                              {haz.description}
-                                          </p>
-
-                                          <div className="flex justify-between items-end border-t border-white/5 pt-3 mt-2">
-                                              <div className="text-[10px] text-gray-500 flex items-center gap-1.5">
-                                                  <Grip size={10}/> Location: {haz.location}
-                                              </div>
-                                              {haz.remediation && (
-                                                  <div className="text-[9px] text-emerald-400/80 bg-emerald-500/5 px-2 py-1 rounded border border-emerald-500/10">
-                                                      Fix: {haz.remediation}
-                                                  </div>
-                                              )}
-                                          </div>
-                                      </div>
+                                      <div className="grid grid-cols-2 gap-4 mt-6"> <div className="bg-background rounded p-3 border border-border"> <div className="text-[9px] text-textTertiary uppercase mb-1 font-mono">Curb Weight</div> <div className="text-sm font-bold text-textPrimary font-mono">{veh.specs?.weight || "N/A"}</div> </div> <div className="bg-background rounded p-3 border border-border"> <div className="text-[9px] text-textTertiary uppercase mb-1 font-mono">Color/Finish</div> <div className="text-sm font-bold text-textPrimary flex items-center gap-2"> <div className="w-3 h-3 rounded-full border border-borderStrong shadow-sm" style={{background: veh.color === 'Red' ? '#ef4444' : veh.color?.toLowerCase()}}></div> {veh.color} </div> </div> </div>
                                   </div>
                               </div>
                           ))}
                       </div>
                   </div>
               )}
-
-              {/* ... (Rest of tabs unchanged: signals, entities, vehicles, occupants, debris, physics, etc.) ... */}
+              {/* OCCUPANTS TAB */}
+              {activeTab === 'occupants' && analysis?.occupantAnalysis && (
+                  <div className="space-y-6 animate-fade-in">
+                      <div className="p-4 bg-primaryLight/30 rounded-lg border border-primaryLight text-primary text-xs font-medium leading-relaxed font-sans"> {analysis.occupantAnalysis.summary} </div>
+                      {ensureArray(analysis.occupantAnalysis.occupants).map((occ, i) => (
+                          <div key={i} className="bg-surface border border-border rounded-xl overflow-hidden shadow-sm">
+                              <div className="p-4 border-b border-border flex justify-between items-center bg-background"> <div className="flex items-center gap-3"> <div className="w-10 h-10 bg-border rounded-full flex items-center justify-center text-textSecondary"> <User size={20}/> </div> <div> <div className="text-sm font-bold text-textPrimary">{occ.id}</div> <div className="text-[10px] text-textSecondary uppercase">{occ.role}</div> </div> </div> <div className="flex items-center gap-3"> <div className="text-right"> <div className="text-[9px] text-textTertiary uppercase font-bold">Distraction</div> <div className="h-1.5 w-16 bg-border rounded-full mt-1"> <div className="h-full bg-danger rounded-full" style={{width: `${occ.distractionScore}%`}}></div> </div> </div> <div className="text-right"> <div className="text-[9px] text-textTertiary uppercase font-bold">Reaction</div> <div className="text-xs font-mono font-bold text-textPrimary">{occ.reactionTime}</div> </div> </div> </div>
+                              <div className="p-4 space-y-3"> {ensureArray(occ.states).map((state, k) => ( <div key={k} className="flex gap-3 text-xs border-l-2 border-border pl-3 py-1 relative"> <div className="absolute -left-[5px] top-2 w-2 h-2 rounded-full bg-borderStrong border-2 border-surface"></div> <div className="w-12 shrink-0 font-mono text-textSecondary">{state.timestamp}</div> <div className="flex-1"> <div className="flex justify-between"> <span className="font-bold text-textPrimary">{state.attentionStatus}</span> <ConfidenceBadge level={state.confidence} /> </div> <div className="text-textSecondary mt-1"> Gaze: {state.gazeVector} • Hands: {state.handAction} </div> </div> </div> ))} </div>
+                          </div>
+                      ))}
+                  </div>
+              )}
+              {/* SIGNALS TAB */}
               {activeTab === 'signals' && analysis?.signalInference && (
                   <div className="space-y-6 animate-fade-in">
-                      {/* Holographic Signal Card */}
-                      <div className="bg-surface border border-white/10 rounded-xl p-6 relative overflow-hidden flex flex-col items-center">
-                          <div className="absolute top-0 right-0 p-3 opacity-10 text-primary"><Signal size={64}/></div>
-                          <h4 className="text-[10px] font-bold text-textTertiary uppercase tracking-widest mb-6 w-full text-left flex items-center gap-2">
-                              <Eye size={12} className="text-primary"/> Signal State Inference
-                          </h4>
-                          
-                          {/* Traffic Light Visualization */}
-                          <div className="w-24 bg-[#0a0a0f] border-2 border-[#1f1f23] rounded-lg p-2 flex flex-col gap-2 shadow-2xl relative">
-                              <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-8 h-1 bg-[#1f1f23] rounded-t"></div>
-                              {/* Red Light */}
-                              <div className={`w-16 h-16 rounded-full border-4 border-[#1f1f23] flex items-center justify-center relative overflow-hidden transition-all duration-500 ${analysis.signalInference.inferredState === 'Red' ? 'bg-red-500 shadow-[0_0_40px_rgba(239,68,68,0.6)]' : 'bg-red-900/20'}`}>
-                                  {analysis.signalInference.inferredState === 'Red' && <div className="absolute inset-0 bg-white/20 blur-md"></div>}
-                              </div>
-                              {/* Yellow Light */}
-                              <div className={`w-16 h-16 rounded-full border-4 border-[#1f1f23] flex items-center justify-center relative overflow-hidden transition-all duration-500 ${analysis.signalInference.inferredState === 'Yellow' ? 'bg-amber-400 shadow-[0_0_40px_rgba(251,191,36,0.6)]' : 'bg-amber-900/20'}`}>
-                                  {analysis.signalInference.inferredState === 'Yellow' && <div className="absolute inset-0 bg-white/20 blur-md"></div>}
-                              </div>
-                              {/* Green Light */}
-                              <div className={`w-16 h-16 rounded-full border-4 border-[#1f1f23] flex items-center justify-center relative overflow-hidden transition-all duration-500 ${analysis.signalInference.inferredState === 'Green' ? 'bg-emerald-500 shadow-[0_0_40px_rgba(16,185,129,0.6)]' : 'bg-emerald-900/20'}`}>
-                                  {analysis.signalInference.inferredState === 'Green' && <div className="absolute inset-0 bg-white/20 blur-md"></div>}
-                              </div>
-                          </div>
-
-                          <div className="mt-6 flex flex-col items-center gap-2">
-                              <div className="text-2xl font-bold text-white tracking-tight">
-                                  {analysis.signalInference.inferredState}
-                              </div>
-                              <ConfidenceBadge level={analysis.signalInference.confidence} />
-                          </div>
+                      <div className="bg-surface border border-border rounded-xl p-6 relative overflow-hidden flex flex-col items-center shadow-card"> <div className="absolute top-0 right-0 p-3 opacity-5 text-primary"><Signal size={64}/></div> <h4 className="text-[10px] font-bold text-textSecondary uppercase tracking-widest mb-6 w-full text-left flex items-center gap-2 font-mono"> <Eye size={12} className="text-primary"/> Signal State Inference </h4> <div className="w-24 bg-slate-800 border-2 border-slate-700 rounded-lg p-2 flex flex-col gap-2 shadow-xl relative"> <div className={`w-16 h-16 rounded-full border-4 border-slate-700 flex items-center justify-center relative overflow-hidden transition-all duration-500 ${analysis.signalInference.inferredState === 'Red' ? 'bg-red-500 shadow-[0_0_20px_rgba(239,68,68,0.5)]' : 'bg-red-900/20'}`}></div> <div className={`w-16 h-16 rounded-full border-4 border-slate-700 flex items-center justify-center relative overflow-hidden transition-all duration-500 ${analysis.signalInference.inferredState === 'Yellow' ? 'bg-amber-400 shadow-[0_0_20px_rgba(251,191,36,0.5)]' : 'bg-amber-900/20'}`}></div> <div className={`w-16 h-16 rounded-full border-4 border-slate-700 flex items-center justify-center relative overflow-hidden transition-all duration-500 ${analysis.signalInference.inferredState === 'Green' ? 'bg-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.5)]' : 'bg-emerald-900/20'}`}></div> </div> <div className="mt-6 flex flex-col items-center gap-2"> <div className="text-2xl font-bold text-textPrimary tracking-tight font-sans"> {analysis.signalInference.inferredState} </div> <ConfidenceBadge level={analysis.signalInference.confidence} /> </div> </div>
+                      <div> <h4 className="text-[10px] font-bold text-textSecondary uppercase mb-3 font-mono tracking-wider">Supporting Evidence</h4> <div className="space-y-3"> {ensureArray(analysis.signalInference.evidence).map((ev, i) => ( <div key={i} className="bg-background border border-border rounded-lg p-3 hover:border-primary/40 transition-colors cursor-pointer" onClick={() => { const match = ev.timestamp.match(/(\d{1,2}):(\d{2})(?:\.(\d+))?/); if (match) { const sec = parseInt(match[1]) * 60 + parseInt(match[2]) + (match[3] ? parseFloat(`0.${match[3]}`) : 0); handleSeek(sec); } }}> <div className="flex justify-between items-start mb-2"> <div className="flex items-center gap-2"> <span className="text-[10px] font-mono text-primary bg-primaryLight/30 px-1.5 rounded border border-primaryLight">{ev.timestamp}</span> <span className="text-xs font-bold text-textPrimary font-sans">{ev.type}</span> </div> <ConfidenceBadge level={ev.confidence} /> </div> <div className="text-[10px] text-textSecondary mb-1.5 font-sans">{ev.observation}</div> <div className="flex items-center gap-1.5 text-[9px] font-bold text-primary bg-primaryLight/30 p-1.5 rounded border border-primaryLight font-mono"> <ChevronRight size={10}/> Implication: {ev.implication} </div> </div> ))} </div> </div>
+                  </div>
+              )}
+              {/* LIABILITY TAB */}
+              {activeTab === 'liability' && (
+                  <div className="flex flex-col h-full space-y-8 animate-fade-in">
+                       <div className="bg-surface border border-border rounded-xl p-6 flex flex-col items-center shadow-card relative overflow-hidden"> <h4 className="text-[10px] font-bold text-textSecondary uppercase tracking-widest mb-4 font-mono">Liability Allocation</h4> <div className="h-48 w-full"> <FaultChart allocations={ensureArray(analysis?.fault?.allocations)} /> </div> <p className="text-xs text-center text-textSecondary mt-4 italic max-w-sm font-serif"> {analysis?.fault.summary} </p> </div>
+                       <div className="bg-primaryLight/20 border border-primaryLight/50 rounded-xl p-4"> <h4 className="text-[10px] font-bold text-primary uppercase mb-3 font-mono flex items-center gap-2"> <Library size={12}/> Legal Precedent Research </h4> <div className="flex gap-2 mb-4"> <input type="text" placeholder="Search case law (e.g. 'Left Turn Yield California')" className="flex-1 bg-surface border border-border rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-primary transition-all" value={legalQuery} onChange={(e) => setLegalQuery(e.target.value)} /> <button onClick={() => { setIsSearching(true); searchSimilarCases(legalQuery).then(res => { setLegalResult(res); setIsSearching(false); }); }} disabled={isSearching || !legalQuery} className="bg-primary text-white px-3 py-2 rounded-lg hover:bg-primaryHover disabled:opacity-50 transition-colors shadow-sm"> {isSearching ? <Loader2 size={14} className="animate-spin"/> : <Search size={14}/>} </button> </div> {legalResult && ( 
+                         <div className="bg-surface rounded-lg border border-primaryLight shadow-sm animate-fade-in overflow-hidden mt-4">
+                           <div className="bg-primaryLight/30 px-4 py-2 border-b border-primaryLight flex justify-between items-center">
+                              <h5 className="text-[10px] font-bold text-primary uppercase tracking-wider">Research Findings</h5>
+                              <span className="text-[9px] text-primary font-mono">GEMINI GROUNDING</span>
+                           </div>
+                           <div className="p-4 max-h-[300px] overflow-y-auto custom-scrollbar">
+                              <FormattedMarkdown text={legalResult.text} />
+                           </div>
+                           {legalResult.chunks && legalResult.chunks.length > 0 && (
+                             <div className="bg-background border-t border-border p-3 space-y-1.5">
+                               <div className="text-[9px] font-bold text-textTertiary uppercase mb-2">Citations & Sources</div>
+                               {legalResult.chunks.map((chunk, i) => (
+                                 <a key={i} href={chunk.web?.uri} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 p-2 bg-surface border border-border rounded hover:border-primary/50 hover:shadow-sm transition-all group">
+                                     <div className="bg-background p-1 rounded text-textTertiary group-hover:text-primary group-hover:bg-primaryLight transition-colors"><Globe size={10}/></div>
+                                     <div className="flex-1 min-w-0">
+                                         <div className="text-[10px] font-bold text-textSecondary truncate group-hover:text-primary transition-colors">{chunk.web?.title}</div>
+                                         <div className="text-[9px] text-textTertiary truncate font-mono">{chunk.web?.uri}</div>
+                                     </div>
+                                 </a>
+                               ))}
+                             </div>
+                           )}
+                         </div>
+                       )} </div>
+                       {ensureArray(analysis?.fault?.allocations).map((alloc, i) => ( <div key={i} className="bg-background border border-border rounded-xl overflow-hidden"> <div className="p-4 border-b border-border flex justify-between items-center bg-surface"> <div className="flex items-center gap-3"> <div className="text-3xl font-mono font-bold text-textPrimary tracking-tighter">{alloc.percentage}%</div> <div> <div className="text-sm font-bold text-textPrimary font-sans">{alloc.party}</div> <ConfidenceBadge level={alloc.confidence} /> </div> </div> </div> <div className="p-5 space-y-5"> {ensureArray(alloc.violations).map((v, k) => ( <div key={k} className="bg-rose-50 border border-rose-100 rounded-md p-3"> <div className="flex justify-between mb-1"> <span className="text-xs font-bold text-danger font-sans">{v.rule}</span> <span className="text-[8px] bg-rose-100 text-rose-800 px-1.5 py-0.5 rounded uppercase font-bold tracking-wider">{v.severity}</span> </div> <div className="text-[10px] text-rose-600 font-mono"> <InlineText text={v.description + " " + v.timestamp} onSeek={handleSeek} /> </div> </div> ))} <div className="p-4 bg-surface rounded-lg border border-border shadow-sm"> <p className="text-xs text-textSecondary leading-relaxed font-sans"> <InlineText text={alloc.reasoning} onSeek={handleSeek} /> </p> </div> </div> </div> ))}
+                  </div>
+              )}
+              {/* PHYSICS TAB */}
+              {activeTab === 'physics' && (
+                  <div className="space-y-6 animate-fade-in">
+                      <div className="bg-background border border-border rounded-xl p-5 relative overflow-hidden"> <h4 className="text-[10px] font-bold text-primary uppercase mb-5 flex items-center gap-2 font-mono tracking-widest"><Zap size={12}/> Variable Sandbox</h4> <div className="space-y-5"> <div> <div className="flex justify-between text-[10px] font-bold text-textSecondary mb-2"><span>VELOCITY DELTA</span><span className="text-textPrimary font-mono bg-surface border border-border px-1.5 rounded shadow-sm">{sandboxSpeed > 0 ? '+' : ''}{sandboxSpeed} mph</span></div> <input type="range" min="-20" max="20" step="5" value={sandboxSpeed} onChange={(e) => setSandboxSpeed(parseInt(e.target.value))} className="w-full h-1 bg-borderStrong rounded-lg appearance-none cursor-pointer custom-range" /> </div> <div> <div className="flex justify-between text-[10px] font-bold text-textSecondary mb-2"><span>FRICTION COEFF (µ)</span><span className="text-textPrimary font-mono bg-surface border border-border px-1.5 rounded shadow-sm">{sandboxFriction}</span></div> <input type="range" min="0.1" max="1.0" step="0.1" value={sandboxFriction} onChange={(e) => setSandboxFriction(parseFloat(e.target.value))} className="w-full h-1 bg-borderStrong rounded-lg appearance-none cursor-pointer custom-range" /> </div> </div> </div>
+                      <h4 className="text-xs font-bold text-textSecondary uppercase mb-2 font-mono">Kinematic Reconstruction</h4>
+                      {ensureArray(analysis?.physics?.speedEstimates).map((est, i) => { const simSpeed = ((est.maxSpeed + est.minSpeed)/2) + sandboxSpeed; const stopDist = Math.pow(simSpeed * 0.447, 2) / (2 * sandboxFriction * 9.8) * 3.28; return ( <div key={i} className="bg-surface border border-border rounded-xl p-4 shadow-card"> <div className="flex justify-between items-center mb-4"> <span className="text-sm font-bold text-textPrimary">{est.entity}</span> <ConfidenceBadge level={est.confidence}/> </div> <div className="grid grid-cols-2 gap-4"> <div> <div className="text-[10px] text-textTertiary uppercase font-bold mb-1">Est. Speed</div> <div className="text-2xl font-mono font-bold text-primary"> {simSpeed.toFixed(0)} <span className="text-sm text-textSecondary">mph</span> </div> </div> <div> <div className="text-[10px] text-emerald-600 uppercase font-bold mb-1">Sim Stop Dist</div> <div className="text-2xl font-mono font-bold text-success"> {stopDist.toFixed(1)} <span className="text-sm text-emerald-600">ft</span> </div> </div> </div> {est.calculation && ( <div className="mt-3 p-3 bg-background border border-border rounded-lg text-xs font-mono text-textSecondary"> <strong className="text-textPrimary">Method:</strong> {est.calculation.method} <br/> <span className="italic">{est.calculation.reasoning}</span> </div> )} </div> ); })}
+                  </div>
+              )}
+              {/* SHADOWS TAB */}
+              {activeTab === 'shadows' && (
+                  analysis?.shadowAnalysis ? (
+                      <div className="space-y-6 animate-fade-in">
+                          <div className="bg-surface border border-border rounded-xl p-6 shadow-sm flex items-center gap-6"> <div className="w-24 h-24 relative shrink-0 border-2 border-border rounded-full bg-background"> <div className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-textTertiary">N</div> <div className="absolute w-1 h-10 bg-warning top-2 left-1/2 -translate-x-1/2 origin-bottom rotate-45 rounded-full shadow-sm"></div> <div className="absolute top-1/2 left-1/2 w-2 h-2 bg-textPrimary rounded-full -translate-x-1/2 -translate-y-1/2"></div> </div> <div className="flex-1 space-y-3"> <h4 className="text-xs font-bold text-textPrimary font-mono uppercase tracking-wide flex items-center gap-2"> <Sun size={14} className="text-warning"/> Solar Geometry </h4> <div className="grid grid-cols-2 gap-3"> <div className="bg-background p-2 rounded border border-border"> <div className="text-[9px] text-textTertiary uppercase">Azimuth</div> <div className="text-sm font-bold text-textPrimary">{analysis.shadowAnalysis.lightSource.azimuth}</div> </div> <div className="bg-background p-2 rounded border border-border"> <div className="text-[9px] text-textTertiary uppercase">Elevation</div> <div className="text-sm font-bold text-textPrimary">{analysis.shadowAnalysis.lightSource.elevation}</div> </div> </div> </div> </div>
+                          <div className="space-y-2"> <h4 className="text-[10px] font-bold text-textSecondary uppercase font-mono">Shadow Consistency</h4> {ensureArray(analysis.shadowAnalysis.artifacts).map((art, i) => ( <div key={i} className="flex gap-3 items-center p-3 bg-surface border border-border rounded-lg shadow-sm"> <div className={`w-2 h-2 rounded-full ${art.consistency === 'Consistent' ? 'bg-success' : 'bg-danger'}`}></div> <div className="flex-1"> <div className="text-xs font-bold text-textPrimary">{art.object}</div> <div className="text-[10px] text-textSecondary">{art.implication}</div> </div> </div> ))} </div>
                       </div>
-
-                      {/* Inference Logic */}
-                      <div className="space-y-4">
-                          <h4 className="text-[10px] font-bold text-textTertiary uppercase">Deduction Logic</h4>
-                          <div className="p-4 bg-surfaceHighlight/10 border-l-2 border-primary rounded-r-lg">
-                              <p className="text-xs text-gray-300 leading-relaxed">
-                                  {analysis.signalInference.reasoning}
+                  ) : (
+                      <EmptyAnalysisState title="Shadow Analysis" icon={Sun} />
+                  )
+              )}
+              {/* SIMULATION TAB */}
+              {activeTab === 'sim' && (
+                  <div className="flex flex-col h-full">
+                      <div className="bg-surface border border-border rounded-lg p-1 flex gap-2 mb-6 shadow-sm"> <input value={customQuery} onChange={(e) => setCustomQuery(e.target.value)} placeholder="Type a 'What If' scenario..." className="flex-1 bg-transparent px-3 py-2 text-xs text-textPrimary focus:outline-none placeholder-textTertiary font-sans" /> <button onClick={() => {setIsSimulating(true); evaluateCounterfactual(analysis?.rawAnalysis||"", customQuery).then(r => {setSimResult(r); setIsSimulating(false)})}} disabled={isSimulating} className="px-3 bg-primaryLight text-primary rounded hover:bg-indigo-200 disabled:opacity-50 transition-colors"> {isSimulating ? <Loader2 size={14} className="animate-spin"/> : <GitPullRequest size={14}/>} </button> </div>
+                      {simResult && ( <div className="p-4 bg-primaryLight/30 border-l-4 border-primary text-xs text-textSecondary leading-relaxed mb-6 animate-fade-in shadow-sm rounded-r-lg font-sans"> <FormattedMarkdown text={simResult} onSeek={handleSeek} /> </div> )}
+                      <div className="space-y-3"> <h4 className="text-[10px] font-bold text-textSecondary uppercase mb-1 font-mono tracking-wider">Generated Counterfactuals</h4> {ensureArray(analysis?.counterfactuals).map((cf, i) => ( <div key={i} onClick={() => setCustomQuery(cf.question)} className="p-4 border border-border hover:border-primary/30 rounded-lg bg-surface cursor-pointer transition-all group shadow-card hover:shadow-soft"> <div className="text-xs font-bold text-textPrimary mb-1.5 group-hover:text-primary transition-colors font-sans">{cf.question}</div> <div className="text-[10px] text-textSecondary flex justify-between font-mono"> <span>Outcome: <span className="font-bold text-textPrimary">{cf.outcome}</span></span> <span className="text-emerald-600 bg-emerald-50 px-1.5 rounded">{cf.probability} Prob.</span> </div> </div> ))} </div>
+                  </div>
+              )}
+              {/* AUDIO TAB */}
+              {activeTab === 'audio' && (
+                  analysis?.audioAnalysis ? (
+                      <div className="space-y-6 animate-fade-in">
+                          <div className="bg-surface border border-border rounded-xl p-6 relative overflow-hidden shadow-card"> <div className="absolute top-0 right-0 p-4 opacity-5 text-primary"><Speaker size={80}/></div> <h4 className="text-[10px] font-bold text-textSecondary uppercase mb-4 flex items-center gap-2 font-mono tracking-widest"> <Waves size={14} className="text-primary"/> Acoustic Signatures </h4> <div className="grid grid-cols-2 gap-4"> <div className="p-3 bg-background rounded border border-border"> <div className="text-[9px] text-textTertiary uppercase mb-1 font-mono">Braking Intensity</div> <div className="text-sm font-bold text-textPrimary">{analysis.audioAnalysis.acoustics.brakingIntensity || "Not Detected"}</div> </div> <div className="p-3 bg-background rounded border border-border"> <div className="text-[9px] text-textTertiary uppercase mb-1 font-mono">Impact Sound</div> <div className="text-sm font-bold text-textPrimary">{analysis.audioAnalysis.acoustics.impactForce || "Not Detected"}</div> </div> </div> </div>
+                          <div> <h4 className="text-[10px] font-bold text-textSecondary uppercase mb-3 font-mono">Audio Events Timeline</h4> <div className="space-y-3"> {ensureArray(analysis.audioAnalysis.events).map((evt, i) => ( <div key={i} className="flex gap-4 p-3 bg-surface border border-border rounded-lg group transition-all hover:shadow-md cursor-pointer" onClick={() => { const match = evt.timestamp.match(/(\d{1,2}):(\d{2})(?:\.(\d+))?/); if (match) { const sec = parseInt(match[1]) * 60 + parseInt(match[2]) + (match[3] ? parseFloat(`0.${match[3]}`) : 0); handleSeek(sec); } }}> <div className="w-10 h-10 rounded-full bg-primaryLight flex items-center justify-center shrink-0 border border-primary/20 text-primary"> <Waves size={18}/> </div> <div className="flex-1 min-w-0"> <div className="flex justify-between items-center mb-1"> <span className="text-xs font-bold text-textPrimary">{evt.type}</span> <span className="text-[10px] font-mono text-primary bg-primaryLight px-1.5 rounded">{evt.timestamp}</span> </div> <p className="text-[10px] text-textSecondary leading-relaxed mb-1">{evt.description}</p> </div> </div> ))} </div> </div>
+                      </div>
+                  ) : (
+                      <EmptyAnalysisState title="Audio Analysis" icon={Waves} />
+                  )
+              )}
+              {/* DEBRIS TAB */}
+              {activeTab === 'debris' && (
+                  analysis?.debrisAnalysis ? (
+                      <div className="space-y-6 animate-fade-in">
+                          <div className="bg-surface border border-border rounded-xl p-6 relative overflow-hidden flex flex-col items-center shadow-card"> <h4 className="text-[10px] font-bold text-textSecondary uppercase tracking-widest mb-6 w-full text-left flex items-center gap-2 font-mono"> <Share2 size={12} className="text-primary"/> Scatter Field Map </h4> <div className="relative w-64 h-64 border-2 border-borderStrong rounded-full bg-background"> {[1, 2, 3].map(i => ( <div key={i} className="absolute inset-0 m-auto rounded-full border border-border" style={{width: `${i*33}%`, height: `${i*33}%`}}></div> ))} <div className="absolute inset-0 m-auto w-full h-px bg-border"></div> <div className="absolute inset-0 m-auto h-full w-px bg-border"></div> <div className="absolute inset-0 m-auto w-3 h-3 bg-danger rounded-full shadow-lg z-10 border-2 border-white"></div> {ensureArray(analysis.debrisAnalysis.items).map((item, i) => { const angle = (item.relativePosition?.angle || Math.random() * 360) - 90; const dist = (item.relativePosition?.distance || 50) / 2; return ( <div key={i} className="absolute w-2 h-2 bg-textSecondary rounded-full cursor-pointer hover:scale-150 transition-transform z-20 shadow-sm hover:bg-textPrimary" style={{ top: `50%`, left: `50%`, transform: `translate(-50%, -50%) rotate(${angle}deg) translateX(${dist * 2.5}px) rotate(${-angle}deg)` }} title={item.id} /> ); })} </div> </div>
+                          <div className="space-y-3"> <h4 className="text-[10px] font-bold text-textSecondary uppercase font-mono">Debris Inventory</h4> {ensureArray(analysis.debrisAnalysis.items).map((item, i) => ( <div key={i} className="bg-background border border-border rounded-lg p-3"> <div className="flex justify-between items-start"> <span className="text-xs font-bold text-textPrimary">{item.id}</span> <span className="text-[9px] font-mono text-textSecondary bg-white px-1.5 rounded border border-border">{item.velocityEstimate} Vel</span> </div> <div className="text-[10px] text-textTertiary mt-1">Origin: {item.originPoint}</div> </div> ))} </div>
+                      </div>
+                  ) : (
+                      <EmptyAnalysisState title="Debris Analysis" icon={Share2} />
+                  )
+              )}
+              {/* SYNTHESIS TAB */}
+              {activeTab === 'synthesis' && (
+                  analysis?.multiView ? (
+                      <div className="space-y-6 animate-fade-in">
+                          <div className="p-4 bg-background rounded-lg border border-border shadow-sm"> <h4 className="text-[10px] font-bold text-textSecondary uppercase mb-2 font-mono flex items-center gap-2"> <Layers size={12}/> Synchronization Status </h4> <p className="text-xs text-textSecondary leading-relaxed"> {analysis.multiView.synchronizationNotes} </p> </div>
+                          <div className="space-y-4"> {ensureArray(analysis.multiView.unifiedTimeline).map((ev, i) => ( <div key={i} className="flex gap-4"> <div className="flex flex-col items-center"> <div className="w-2 h-2 bg-primary rounded-full ring-4 ring-primaryLight/50"></div> {i < (ensureArray(analysis.multiView!.unifiedTimeline).length - 1) && <div className="w-0.5 flex-1 bg-border my-1"></div>} </div> <div className="pb-4 flex-1"> <div className="flex justify-between items-center mb-1"> <span className="text-[10px] font-mono font-bold text-textSecondary">{ev.timestamp}</span> <span className="text-[9px] bg-background text-textSecondary px-2 py-0.5 rounded-full border border-border">{ev.bestViewSource}</span> </div> <div className="bg-surface border border-border rounded-lg p-3 shadow-sm hover:border-primary/30 transition-colors"> <p className="text-xs text-textPrimary font-medium mb-2">{ev.description}</p> <div className="flex items-center gap-1.5 text-[9px] text-success"> <CheckCircle2 size={10}/> Corroboration: {ev.corroboration} </div> </div> </div> </div> ))} </div>
+                      </div>
+                  ) : (
+                      <EmptyAnalysisState title="Multi-View Synthesis" icon={Layers} />
+                  )
+              )}
+              {/* REFLECTIONS TAB */}
+              {activeTab === 'reflections' && (
+                  analysis?.reflectionAnalysis ? (
+                      <div className="space-y-6 animate-fade-in">
+                          <div className="bg-surface border border-border rounded-xl p-6 shadow-sm relative overflow-hidden">
+                              <div className="absolute top-0 right-0 p-4 opacity-5 text-primary"><Sparkles size={80}/></div>
+                              <h4 className="text-[10px] font-bold text-textSecondary uppercase mb-2 font-mono flex items-center gap-2">
+                                  <Sparkles size={14} className="text-primary"/> Indirect Visual Evidence
+                              </h4>
+                              <p className="text-xs text-textPrimary leading-relaxed font-serif border-l-2 border-primary/50 pl-4 italic">
+                                  "{analysis.reflectionAnalysis.summary}"
                               </p>
                           </div>
-                      </div>
-
-                      {/* Evidence List */}
-                      <div>
-                          <h4 className="text-[10px] font-bold text-textTertiary uppercase mb-3">Supporting Indirect Evidence</h4>
-                          <div className="space-y-3">
-                              {(analysis.signalInference.evidence || []).map((ev, i) => (
-                                  <div key={i} className="bg-surfaceHighlight/20 border border-white/5 rounded-lg p-3 hover:bg-surfaceHighlight/40 transition-colors cursor-pointer" onClick={() => {
-                                      const match = ev.timestamp.match(/(\d{1,2}):(\d{2})(?:\.(\d+))?/);
+                          <div className="space-y-4">
+                              {ensureArray(analysis.reflectionAnalysis.artifacts).map((art, i) => (
+                                  <div key={i} className="bg-background border border-border rounded-lg p-4 hover:border-primary/30 transition-all cursor-pointer group" onClick={() => {
+                                      const match = art.timestamp.match(/(\d{1,2}):(\d{2})(?:\.(\d+))?/);
                                       if (match) {
                                           const sec = parseInt(match[1]) * 60 + parseInt(match[2]) + (match[3] ? parseFloat(`0.${match[3]}`) : 0);
                                           handleSeek(sec);
@@ -1218,898 +1334,46 @@ export const AnalysisDashboard: React.FC<AnalysisDashboardProps> = ({ analysis, 
                                   }}>
                                       <div className="flex justify-between items-start mb-2">
                                           <div className="flex items-center gap-2">
-                                              <span className="text-[10px] font-mono text-primary bg-primary/10 px-1.5 rounded">{ev.timestamp}</span>
-                                              <span className="text-xs font-bold text-white">{ev.type}</span>
+                                              <span className="text-[10px] font-mono text-primary bg-primaryLight/30 px-1.5 rounded border border-primaryLight">{art.timestamp}</span>
+                                              <span className="text-xs font-bold text-textPrimary">{art.surface}</span>
                                           </div>
-                                          <ConfidenceBadge level={ev.confidence} />
+                                          <span className={`text-[9px] uppercase font-bold px-2 py-0.5 rounded ${
+                                              art.significance === 'Critical' ? 'bg-rose-100 text-rose-700' : 
+                                              art.significance === 'High' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'
+                                          }`}>{art.significance}</span>
                                       </div>
-                                      <div className="text-[10px] text-gray-400 mb-1.5">{ev.observation}</div>
-                                      <div className="flex items-center gap-1.5 text-[9px] font-bold text-primary bg-primary/5 p-1.5 rounded border border-primary/10">
-                                          <ChevronRight size={10}/> Implication: {ev.implication}
-                                      </div>
-                                  </div>
-                              ))}
-                          </div>
-                      </div>
-                  </div>
-              )}
-
-              {/* VEHICLE IDENTIFICATION TAB (NEW) */}
-              {activeTab === 'vehicles' && analysis?.vehicleAnalysis && (
-                  <div className="space-y-6 animate-fade-in">
-                      {/* Summary */}
-                      <div className="p-4 bg-surfaceHighlight/20 rounded border border-white/5">
-                          <h4 className="text-[10px] font-bold text-textTertiary uppercase mb-2">Fleet Identification Summary</h4>
-                          <p className="text-xs text-gray-300 leading-relaxed italic border-l-2 border-primary/50 pl-3">
-                              "{analysis.vehicleAnalysis.summary}"
-                          </p>
-                      </div>
-
-                      {/* Vehicle Cards */}
-                      <div className="space-y-6">
-                          {(analysis.vehicleAnalysis.vehicles || []).map((veh, i) => (
-                              <div key={i} className="bg-surface border border-white/10 rounded-xl overflow-hidden shadow-lg">
-                                  {/* Header */}
-                                  <div className="bg-[#121216] border-b border-white/5 p-4 flex justify-between items-center">
-                                      <div className="flex items-center gap-3">
-                                          <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
-                                              <Car size={20} />
-                                          </div>
+                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                           <div>
-                                              <div className="text-sm font-bold text-white">{veh.make} {veh.model}</div>
-                                              <div className="text-[10px] text-gray-500 uppercase tracking-wide">{veh.yearRange} {veh.trimLevel}</div>
+                                              <div className="text-[9px] text-textTertiary uppercase font-bold mb-1">Observation</div>
+                                              <p className="text-[11px] text-textSecondary leading-snug">{art.description}</p>
                                           </div>
-                                      </div>
-                                      <div className="text-right">
-                                          <div className="text-[9px] text-gray-500 uppercase mb-1">ID Confidence</div>
-                                          <ConfidenceBadge level={veh.confidence} />
-                                      </div>
-                                  </div>
-
-                                  {/* Blueprint Visualization */}
-                                  <div className="p-6 relative bg-gradient-to-br from-[#0a0a0f] to-[#121216]">
-                                      <div className="absolute inset-0 bg-grid-pattern bg-[length:20px_20px] opacity-10 pointer-events-none"></div>
-                                      
-                                      {/* Schematic Representation */}
-                                      <div className="relative border border-primary/20 rounded-lg p-8 flex items-center justify-center min-h-[160px]">
-                                          {/* Car Outline (Abstract) */}
-                                          <div className="w-48 h-24 border-2 border-primary/40 rounded-lg relative flex items-center justify-center">
-                                              <div className="text-[10px] font-mono text-primary/50 uppercase tracking-widest">Chassis: {veh.entityId}</div>
-                                              
-                                              {/* Dimension Lines */}
-                                              {/* Length */}
-                                              <div className="absolute -bottom-6 left-0 right-0 h-4 border-l border-r border-b border-white/20 flex items-center justify-center">
-                                                  <span className="absolute top-full mt-1 text-[9px] font-mono text-white bg-[#0a0a0f] px-1">L: {veh.specs.length}</span>
-                                              </div>
-                                              
-                                              {/* Wheelbase */}
-                                              <div className="absolute bottom-2 left-8 right-8 h-2 border-b border-dashed border-primary/50 flex items-center justify-center">
-                                                  <span className="absolute top-full mt-0.5 text-[8px] font-mono text-primary">WB: {veh.specs.wheelbase}</span>
-                                              </div>
-
-                                              {/* Height */}
-                                              <div className="absolute -right-6 top-0 bottom-0 w-4 border-t border-b border-r border-white/20 flex items-center justify-center">
-                                                  <span className="absolute left-full ml-1 text-[9px] font-mono text-white bg-[#0a0a0f] px-1 whitespace-nowrap" style={{writingMode: 'vertical-rl'}}>H: {veh.specs.height}</span>
-                                              </div>
+                                          <div className="bg-surface rounded border border-border p-2">
+                                              <div className="text-[9px] text-primary uppercase font-bold mb-1 flex items-center gap-1"><Search size={10}/> Forensic Insight</div>
+                                              <p className="text-[11px] text-textPrimary font-medium leading-snug">{art.revealedInformation}</p>
                                           </div>
-                                      </div>
-
-                                      {/* Specs Grid */}
-                                      <div className="grid grid-cols-2 gap-4 mt-6">
-                                          <div className="bg-white/5 rounded p-3 border border-white/5">
-                                              <div className="text-[9px] text-textTertiary uppercase mb-1">Curb Weight</div>
-                                              <div className="text-sm font-bold text-white font-mono">{veh.specs.weight}</div>
-                                          </div>
-                                          <div className="bg-white/5 rounded p-3 border border-white/5">
-                                              <div className="text-[9px] text-textTertiary uppercase mb-1">Color/Finish</div>
-                                              <div className="text-sm font-bold text-white flex items-center gap-2">
-                                                  <div className="w-3 h-3 rounded-full border border-white/20" style={{background: veh.color === 'Red' ? '#ef4444' : veh.color.toLowerCase()}}></div>
-                                                  {veh.color}
-                                              </div>
-                                          </div>
-                                      </div>
-                                  </div>
-
-                                  {/* Distinctive Features */}
-                                  <div className="p-4 border-t border-white/5 bg-surfaceHighlight/5">
-                                      <h5 className="text-[9px] font-bold text-textTertiary uppercase mb-2 flex items-center gap-1.5">
-                                          <Search size={10} /> Identified Features
-                                      </h5>
-                                      <ul className="space-y-1">
-                                          {veh.distinctiveFeatures.map((feat, k) => (
-                                              <li key={k} className="text-[10px] text-gray-400 flex items-start gap-2">
-                                                  <span className="text-primary mt-0.5">•</span> {feat}
-                                              </li>
-                                          ))}
-                                          {veh.licensePlate && (
-                                              <li className="text-[10px] text-emerald-400 flex items-start gap-2 font-mono font-bold mt-1">
-                                                  <span className="text-emerald-500 mt-0.5">#</span> PLATE: {veh.licensePlate}
-                                              </li>
-                                          )}
-                                      </ul>
-                                  </div>
-                              </div>
-                          ))}
-                      </div>
-                  </div>
-              )}
-
-              {activeTab === 'entities' && (
-                  <div className="space-y-4">
-                      {(analysis?.entities || []).map((ent, i) => (
-                          <div key={i} className="bg-surface border border-white/5 rounded-lg p-4 flex gap-4 hover:border-white/10 transition-colors">
-                              <div className="w-1.5 rounded-full bg-white/20 self-stretch" style={{background: ent.color}}></div>
-                              <div>
-                                  <h4 className="text-sm font-bold text-white flex items-center gap-2">{ent.id} <span className="text-[9px] text-textTertiary bg-white/5 px-1.5 py-0.5 rounded border border-white/5 uppercase tracking-wide">{ent.type}</span></h4>
-                                  <p className="text-xs text-textSecondary mt-1 leading-relaxed">
-                                      <TextWithTimestamps text={ent.description} onSeek={handleSeek} />
-                                  </p>
-                              </div>
-                          </div>
-                      ))}
-                      {analysis?.fleetSafety && (
-                          <div className="pt-6 border-t border-white/5">
-                              <h4 className="text-[10px] font-bold text-textTertiary uppercase mb-4 flex items-center gap-2"><Truck size={12}/> Fleet Telematics Profile</h4>
-                              <div className="bg-surface border border-white/5 rounded-lg p-4">
-                                  <div className="w-full h-48">
-                                    <RiskRadarChart data={analysis.fleetSafety.riskVectors || []} />
-                                  </div>
-                              </div>
-                              <div className="grid grid-cols-2 gap-2 mt-4">
-                                 {(analysis.fleetSafety.driverPerformance || []).map((m,i) => (
-                                     <div key={i} className="p-2 bg-white/5 rounded border border-white/5">
-                                         <div className="text-[9px] text-textTertiary uppercase">{m.metric}</div>
-                                         <div className={`text-xs font-bold ${m.status==='Excellent'?'text-success':'text-warning'}`}>{m.status}</div>
-                                     </div>
-                                 ))}
-                              </div>
-                          </div>
-                      )}
-                  </div>
-              )}
-
-              {/* ... (Rest of the tabs: occupants, debris, physics, etc. unchanged) ... */}
-              {activeTab === 'occupants' && analysis?.occupantAnalysis && (
-                  <div className="space-y-6 animate-fade-in">
-                      {/* Driver Status Card */}
-                      <div className="bg-surface border border-white/10 rounded-xl p-5 relative overflow-hidden">
-                          <div className="absolute top-0 right-0 p-3 opacity-5 text-indigo-500"><User size={120}/></div>
-                          <h4 className="text-[10px] font-bold text-textTertiary uppercase mb-4 flex items-center gap-2">
-                              <Eye size={12} className="text-indigo-500"/> Driver Attention Monitor
-                          </h4>
-                          
-                          <div className="space-y-6">
-                              {(analysis.occupantAnalysis.occupants || []).map((occ, i) => (
-                                  <div key={i} className="bg-black/20 rounded-lg p-4 border border-white/5">
-                                      <div className="flex justify-between items-center mb-4">
-                                          <div className="flex items-center gap-3">
-                                              <div className="w-10 h-10 rounded-full bg-indigo-500/20 flex items-center justify-center text-indigo-400">
-                                                  <User size={20} />
-                                              </div>
-                                              <div>
-                                                  <div className="text-sm font-bold text-white">{occ.id}</div>
-                                                  <div className="text-[10px] text-gray-500 uppercase">{occ.role}</div>
-                                              </div>
-                                          </div>
-                                          <div className="text-right">
-                                              <div className="text-[9px] text-gray-500 uppercase mb-1">Distraction Level</div>
-                                              <div className="flex items-center gap-2 justify-end">
-                                                  <div className="h-1.5 w-16 bg-white/10 rounded-full overflow-hidden">
-                                                      <div className={`h-full rounded-full ${occ.distractionScore > 50 ? 'bg-rose-500' : 'bg-emerald-500'}`} style={{width: `${occ.distractionScore}%`}}></div>
-                                                  </div>
-                                                  <span className={`text-xs font-mono font-bold ${occ.distractionScore > 50 ? 'text-rose-400' : 'text-emerald-400'}`}>{occ.distractionScore}%</span>
-                                              </div>
-                                          </div>
-                                      </div>
-
-                                      {/* Behavior Timeline for this occupant */}
-                                      <div className="space-y-2">
-                                          <div className="text-[9px] font-bold text-textTertiary uppercase mb-2">Observed Behaviors</div>
-                                          {(occ.states || []).map((state, k) => (
-                                              <div key={k} className="relative pl-4 border-l border-white/10 pb-4 last:pb-0" onClick={() => {
-                                                  const match = state.timestamp.match(/(\d{1,2}):(\d{2})(?:\.(\d+))?/);
-                                                  if (match) {
-                                                      const sec = parseInt(match[1]) * 60 + parseInt(match[2]) + (match[3] ? parseFloat(`0.${match[3]}`) : 0);
-                                                      handleSeek(sec);
-                                                  }
-                                              }}>
-                                                  <div className={`absolute -left-[5px] top-0 w-2.5 h-2.5 rounded-full border ${state.attentionStatus === 'Distracted' ? 'bg-rose-500 border-rose-600' : 'bg-surface border-white/30'}`}></div>
-                                                  
-                                                  <div className="flex justify-between items-start cursor-pointer hover:bg-white/5 p-1 rounded transition-colors -mt-1">
-                                                      <div>
-                                                          <div className="flex items-center gap-2">
-                                                              <span className="text-[10px] font-mono text-primary">{state.timestamp}</span>
-                                                              <span className={`text-[10px] font-bold uppercase ${state.attentionStatus === 'Distracted' ? 'text-rose-400' : 'text-gray-300'}`}>{state.attentionStatus}</span>
-                                                          </div>
-                                                          <div className="grid grid-cols-2 gap-x-4 gap-y-1 mt-1 text-[10px] text-gray-400">
-                                                              <div className="flex items-center gap-1.5"><Eye size={10} className="text-textTertiary"/> {state.gazeVector}</div>
-                                                              <div className="flex items-center gap-1.5"><Grip size={10} className="text-textTertiary"/> {state.handAction}</div>
-                                                              <div className="flex items-center gap-1.5"><UserX size={10} className="text-textTertiary"/> {state.posture}</div>
-                                                              {state.facialExpression && <div className="flex items-center gap-1.5"><Scan size={10} className="text-textTertiary"/> Exp: {state.facialExpression}</div>}
-                                                          </div>
-                                                      </div>
-                                                      <ConfidenceBadge level={state.confidence} />
-                                                  </div>
-                                              </div>
-                                          ))}
                                       </div>
                                   </div>
                               ))}
                           </div>
                       </div>
-                      
-                      {/* Summary Analysis */}
-                      <div className="p-4 bg-surfaceHighlight/20 rounded border border-white/5">
-                          <h4 className="text-[10px] font-bold text-textTertiary uppercase mb-2">Behavioral Synthesis</h4>
-                          <p className="text-xs text-gray-300 leading-relaxed italic border-l-2 border-indigo-500/50 pl-3">
-                              "{analysis.occupantAnalysis.summary}"
-                          </p>
-                      </div>
-                  </div>
+                  ) : (
+                      <EmptyAnalysisState title="Reflection Analysis" icon={Sparkles} />
+                  )
               )}
-
-              {/* DEBRIS TAB (NEW) */}
-              {activeTab === 'debris' && analysis?.debrisAnalysis && (
-                  <div className="space-y-6 animate-fade-in">
-                      {/* Scatter Field Visualization */}
-                      <div className="bg-surface border border-white/10 rounded-xl p-6 relative overflow-hidden flex flex-col items-center">
-                          <div className="absolute top-0 right-0 p-3 opacity-10 text-primary"><Share2 size={64}/></div>
-                          <h4 className="text-[10px] font-bold text-textTertiary uppercase tracking-widest mb-6 w-full text-left flex items-center gap-2">
-                              <Share2 size={12} className="text-primary"/> Scatter Field Map
-                          </h4>
-                          
-                          {/* Radial Plot */}
-                          <div className="relative w-64 h-64">
-                              {/* Grid Circles */}
-                              {[1, 2, 3].map(i => (
-                                  <div key={i} className="absolute inset-0 m-auto rounded-full border border-white/5" style={{width: `${i*33}%`, height: `${i*33}%`}}></div>
-                              ))}
-                              {/* Axes */}
-                              <div className="absolute inset-0 m-auto w-full h-px bg-white/5"></div>
-                              <div className="absolute inset-0 m-auto h-full w-px bg-white/5"></div>
-                              
-                              {/* Impact Center */}
-                              <div className="absolute inset-0 m-auto w-3 h-3 bg-danger rounded-full shadow-[0_0_15px_rgba(244,63,94,0.8)] z-10"></div>
-                              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-6 text-[8px] font-bold text-danger uppercase tracking-wider">Impact Zero</div>
-
-                              {/* Debris Points */}
-                              {(analysis.debrisAnalysis.items || []).map((item, i) => {
-                                  // Default logic if relativePosition is missing (fallback to random scatter for demo if needed, but schema requires it)
-                                  const angle = (item.relativePosition?.angle || Math.random() * 360) - 90; // Adjust so 0 is up
-                                  const dist = (item.relativePosition?.distance || 50) / 2; // Scale to radius (0-50%)
-                                  
-                                  return (
-                                      <div 
-                                        key={i} 
-                                        className="absolute w-2 h-2 bg-primary rounded-full hover:scale-150 transition-transform cursor-pointer group z-20"
-                                        style={{
-                                            top: `50%`, 
-                                            left: `50%`,
-                                            transform: `translate(-50%, -50%) rotate(${angle}deg) translateX(${dist * 2.5}px) rotate(${-angle}deg)` // Simple radial positioning math
-                                        }}
-                                        title={item.id}
-                                      >
-                                          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap bg-black/80 px-2 py-1 rounded text-[8px] text-white pointer-events-none">
-                                              {item.type}
-                                          </div>
-                                      </div>
-                                  );
-                              })}
-                          </div>
-                          
-                          <div className="mt-6 w-full grid grid-cols-2 gap-4">
-                              <div className="p-3 bg-surfaceHighlight/20 rounded border border-white/5 text-center">
-                                  <div className="text-[9px] text-textTertiary uppercase mb-1">Pattern Shape</div>
-                                  <div className="text-sm font-bold text-white">{analysis.debrisAnalysis.pattern.shape}</div>
-                              </div>
-                              <div className="p-3 bg-surfaceHighlight/20 rounded border border-white/5 text-center">
-                                  <div className="text-[9px] text-textTertiary uppercase mb-1">Principal Axis</div>
-                                  <div className="text-sm font-bold text-white">{analysis.debrisAnalysis.pattern.principalAxis}</div>
-                              </div>
-                          </div>
+              {/* FLEET SAFETY TAB */}
+              {activeTab === 'fleet' && (
+                  analysis?.fleetSafety ? (
+                      <div className="space-y-6 animate-fade-in">
+                          <div className="bg-surface border border-border rounded-xl p-6 shadow-card flex items-center justify-between"> <div> <h4 className="text-xs font-bold text-textSecondary uppercase font-mono tracking-wider mb-1">Overall Safety Score</h4> <div className="text-4xl font-mono font-bold text-textPrimary tracking-tighter">{analysis.fleetSafety.overallSafetyScore}<span className="text-lg text-textTertiary font-sans font-normal">/100</span></div> </div> <div className="h-16 w-16"> <svg viewBox="0 0 36 36" className="w-full h-full transform -rotate-90"> <path className="text-background" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="3" /> <path className={`${analysis.fleetSafety.overallSafetyScore > 80 ? 'text-success' : analysis.fleetSafety.overallSafetyScore > 50 ? 'text-warning' : 'text-danger'}`} strokeDasharray={`${analysis.fleetSafety.overallSafetyScore}, 100`} d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="3" /> </svg> </div> </div>
+                          {analysis.fleetSafety.riskVectors && ( <div className="bg-surface border border-border rounded-xl p-4 shadow-sm h-64 flex flex-col flex-1"> <h4 className="text-[10px] font-bold text-textSecondary uppercase mb-2 font-mono text-center">Driver Risk Profile</h4> <div className="flex-1 w-full min-h-0"><RiskRadarChart data={analysis.fleetSafety.riskVectors} /></div> </div> )}
+                          <div className="space-y-3"> <h4 className="text-[10px] font-bold text-textSecondary uppercase font-mono">Corrective Actions</h4> {ensureArray(analysis.fleetSafety.trainingRecommendations).map((rec, i) => ( <div key={i} className="bg-background border-l-2 border-primary p-3 rounded-r-lg"> <div className="flex justify-between items-center mb-1"> <span className="text-xs font-bold text-textPrimary">{rec.module}</span> <span className={`text-[8px] uppercase font-bold px-1.5 py-0.5 rounded ${rec.priority === 'High' ? 'bg-rose-100 text-rose-700' : 'bg-slate-200 text-slate-600'}`}>{rec.priority} Priority</span> </div> <p className="text-[10px] text-textSecondary">{rec.reason}</p> </div> ))} </div>
                       </div>
-
-                      {/* Item Inventory */}
-                      <div>
-                          <h4 className="text-[10px] font-bold text-textTertiary uppercase mb-3">Debris Inventory</h4>
-                          <div className="space-y-3">
-                              {(analysis.debrisAnalysis.items || []).map((item, i) => (
-                                  <div key={i} className="bg-surfaceHighlight/20 border border-white/5 rounded-lg p-3 hover:bg-surfaceHighlight/40 transition-colors">
-                                      <div className="flex justify-between items-start mb-2">
-                                          <div>
-                                              <div className="text-xs font-bold text-white">{item.id}</div>
-                                              <div className="text-[9px] text-primary uppercase">{item.type}</div>
-                                          </div>
-                                          <div className="text-right">
-                                              <div className="text-[9px] font-mono text-gray-400">{item.velocityEstimate} Vel.</div>
-                                          </div>
-                                      </div>
-                                      <div className="grid grid-cols-2 gap-2 text-[10px] text-gray-400 mt-2 pt-2 border-t border-white/5">
-                                          <div><span className="text-textTertiary">Origin:</span> {item.originPoint}</div>
-                                          <div><span className="text-textTertiary">Landing:</span> {item.landingLocation}</div>
-                                      </div>
-                                  </div>
-                              ))}
-                          </div>
-                      </div>
-                      
-                      {/* Conclusion */}
-                      <div className="p-4 bg-surfaceHighlight/10 border-l-2 border-primary rounded-r-lg">
-                          <h4 className="text-[9px] font-bold text-primary uppercase mb-1">Collision Geometry Conclusion</h4>
-                          <p className="text-xs text-gray-300 leading-relaxed">
-                              {analysis.debrisAnalysis.collisionGeometry}
-                          </p>
-                      </div>
-                  </div>
+                  ) : (
+                      <EmptyAnalysisState title="Fleet Safety" icon={ShieldAlert} />
+                  )
               )}
-
-              {/* PHYSICS TAB */}
-              {activeTab === 'physics' && (
-                  <div className="space-y-6">
-                      {/* Control Deck */}
-                      <div className="bg-surfaceHighlight/30 border border-white/10 rounded-xl p-5 relative overflow-hidden">
-                          <h4 className="text-[10px] font-bold text-primary uppercase mb-5 flex items-center gap-2"><Zap size={12}/> Variable Sandbox</h4>
-                          
-                          <div className="space-y-5">
-                              <div>
-                                  <div className="flex justify-between text-[10px] font-bold text-textSecondary mb-2"><span>VELOCITY DELTA</span><span className="text-white font-mono bg-white/10 px-1.5 rounded">{sandboxSpeed > 0 ? '+' : ''}{sandboxSpeed} mph</span></div>
-                                  <input type="range" min="-20" max="20" step="5" value={sandboxSpeed} onChange={(e) => setSandboxSpeed(parseInt(e.target.value))} className="w-full h-1 bg-white/10 rounded-lg appearance-none cursor-pointer custom-range" />
-                              </div>
-                              <div>
-                                  <div className="flex justify-between text-[10px] font-bold text-textSecondary mb-2"><span>FRICTION COEFF (µ)</span><span className="text-white font-mono bg-white/10 px-1.5 rounded">{sandboxFriction}</span></div>
-                                  <input type="range" min="0.1" max="1.0" step="0.1" value={sandboxFriction} onChange={(e) => setSandboxFriction(parseFloat(e.target.value))} className="w-full h-1 bg-white/10 rounded-lg appearance-none cursor-pointer custom-range" />
-                              </div>
-                          </div>
-                      </div>
-
-                      {/* Results */}
-                      {(analysis?.physics?.speedEstimates || []).map((est, i) => {
-                          const simSpeed = ((est.maxSpeed + est.minSpeed)/2) + sandboxSpeed;
-                          const stopDist = Math.pow(simSpeed * 0.447, 2) / (2 * sandboxFriction * 9.8) * 3.28;
-                          const gForce = (Math.pow(simSpeed * 0.447, 2)) / (2 * 2 * 9.8);
-                          
-                          return (
-                              <div key={i} className="bg-surface border border-white/5 rounded-xl p-4 space-y-4">
-                                  {/* Header */}
-                                  <div className="flex justify-between items-center">
-                                      <span className="text-xs font-bold text-white flex items-center gap-2"><Truck size={12}/> {est.entity}</span>
-                                      <ConfidenceBadge level={est.confidence} />
-                                  </div>
-                                  
-                                  {/* G-Force & Speed Visualization */}
-                                  <div className="flex items-center gap-4">
-                                       <div className="w-16 h-16 rounded-full border-4 border-surfaceHighlight relative flex items-center justify-center shrink-0">
-                                           <svg className="absolute inset-0 -rotate-90" viewBox="0 0 36 36">
-                                                <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="#444" strokeWidth="3" />
-                                                <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke={gForce > 5 ? '#ef4444' : '#f59e0b'} strokeWidth="3" strokeDasharray={`${Math.min(100, gForce * 5)}, 100`} />
-                                           </svg>
-                                           <div className="text-center">
-                                               <div className="text-[10px] font-bold text-white">{gForce.toFixed(1)}</div>
-                                               <div className="text-[8px] text-gray-500">G</div>
-                                           </div>
-                                       </div>
-                                       
-                                       <div className="flex-1 min-w-0">
-                                            <div className="grid grid-cols-2 gap-4">
-                                                <div>
-                                                    <div className="text-[9px] text-textTertiary font-bold uppercase mb-0.5">Est Speed</div>
-                                                    <div className="text-lg font-mono text-white tracking-tight">{simSpeed.toFixed(0)} <span className="text-[10px] text-textSecondary">mph</span></div>
-                                                </div>
-                                                <div>
-                                                    <div className="text-[9px] text-emerald-500 font-bold uppercase mb-0.5">Sim Stop Dist</div>
-                                                    <div className="text-lg font-mono text-emerald-400 tracking-tight">{stopDist.toFixed(1)} <span className="text-[10px] text-emerald-600">ft</span></div>
-                                                </div>
-                                            </div>
-                                       </div>
-                                  </div>
-
-                                  {/* Calculation Methodology Card */}
-                                  {est.calculation && (
-                                    <div className="mt-3 p-3 bg-surfaceHighlight/50 border border-white/5 rounded-lg">
-                                        <div className="flex items-center gap-2 mb-2">
-                                            <Calculator size={12} className="text-primary"/>
-                                            <span className="text-[9px] font-bold text-textTertiary uppercase">Methodology</span>
-                                        </div>
-                                        <div className="space-y-2">
-                                            <div className="flex gap-2">
-                                                <Ruler size={12} className="text-gray-500 mt-0.5 shrink-0"/>
-                                                <div className="text-[10px] text-gray-400">
-                                                    <span className="text-gray-500">Reference:</span> {est.calculation.referenceObject}
-                                                </div>
-                                            </div>
-                                            <div className="flex gap-2">
-                                                <Activity size={12} className="text-gray-500 mt-0.5 shrink-0"/>
-                                                <div className="text-[10px] text-gray-400 leading-relaxed">
-                                                    <span className="text-gray-500">Logic:</span> {est.calculation.reasoning}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                  )}
-                              </div>
-                          );
-                      })}
-
-                      {/* Motion Blur Forensics (New Section) */}
-                      {(analysis?.physics?.motionBlurMetrics || []).length > 0 && (
-                          <div className="bg-surface border border-white/5 rounded-xl p-4 relative overflow-hidden">
-                              <div className="absolute top-0 right-0 p-3 opacity-10 text-primary"><Wind size={64}/></div>
-                              <h4 className="text-[10px] font-bold text-textTertiary uppercase mb-4 flex items-center gap-2">
-                                  <Wind size={12} className="text-primary"/> Motion Blur Velocity Extraction
-                              </h4>
-                              
-                              <div className="space-y-3">
-                                  {analysis?.physics?.motionBlurMetrics?.map((blur, i) => (
-                                      <div key={i} className="p-3 bg-surfaceHighlight/20 rounded border border-white/5 cursor-pointer hover:border-primary/30 transition-colors" onClick={() => {
-                                          const match = blur.timestamp.match(/(\d{1,2}):(\d{2})(?:\.(\d+))?/);
-                                          if (match) {
-                                              const sec = parseInt(match[1]) * 60 + parseInt(match[2]) + (match[3] ? parseFloat(`0.${match[3]}`) : 0);
-                                              handleSeek(sec);
-                                          }
-                                      }}>
-                                          <div className="flex justify-between items-center mb-2">
-                                              <span className="text-xs font-bold text-white flex items-center gap-2"><Camera size={12}/> {blur.entityId}</span>
-                                              <ConfidenceBadge level={blur.confidence} />
-                                          </div>
-                                          
-                                          <div className="grid grid-cols-3 gap-2 mb-2">
-                                              <div className="bg-black/20 p-2 rounded">
-                                                  <div className="text-[8px] text-gray-500 uppercase">Blur Length</div>
-                                                  <div className="text-xs font-mono text-primary">{blur.blurLengthPixels}px</div>
-                                              </div>
-                                              <div className="bg-black/20 p-2 rounded">
-                                                  <div className="text-[8px] text-gray-500 uppercase">Exposure</div>
-                                                  <div className="text-xs font-mono text-white">{blur.estimatedExposure}</div>
-                                              </div>
-                                              <div className="bg-black/20 p-2 rounded border border-primary/20">
-                                                  <div className="text-[8px] text-primary uppercase">Implied V</div>
-                                                  <div className="text-xs font-mono font-bold text-white">{blur.calculatedSpeed}</div>
-                                              </div>
-                                          </div>
-                                          <div className="flex items-center gap-2 text-[9px] text-gray-500">
-                                              <Aperture size={10}/>
-                                              <span>Direction: {blur.blurDirection}</span>
-                                              <span className="bg-white/10 px-1 rounded text-white">{blur.timestamp}</span>
-                                          </div>
-                                      </div>
-                                  ))}
-                              </div>
-                          </div>
-                      )}
-                  </div>
-              )}
-              
-              {/* ... (Rest of the tabs: audio, reflections, shadows, etc. unchanged) ... */}
-              {activeTab === 'audio' && analysis?.audioAnalysis && (
-                  <div className="space-y-6 animate-fade-in">
-                      {/* Acoustic Signature Card */}
-                      <div className="bg-surface border border-white/10 rounded-xl p-5 relative overflow-hidden">
-                          <div className="absolute top-0 right-0 p-3 opacity-10"><Waves size={64}/></div>
-                          <h4 className="text-[10px] font-bold text-primary uppercase mb-4 flex items-center gap-2">
-                              <Speaker size={12} /> Acoustic Signature Analysis
-                          </h4>
-                          
-                          <div className="grid grid-cols-2 gap-4">
-                              <div className="p-3 bg-surfaceHighlight/20 rounded border border-white/5">
-                                  <div className="text-[9px] text-textTertiary uppercase mb-1">Braking Intensity</div>
-                                  <div className="text-sm font-bold text-white">{analysis.audioAnalysis.acoustics.brakingIntensity || "Not Detected"}</div>
-                              </div>
-                              <div className="p-3 bg-surfaceHighlight/20 rounded border border-white/5">
-                                  <div className="text-[9px] text-textTertiary uppercase mb-1">Impact Energy</div>
-                                  <div className="text-sm font-bold text-white">{analysis.audioAnalysis.acoustics.impactForce || "Not Detected"}</div>
-                              </div>
-                              <div className="p-3 bg-surfaceHighlight/20 rounded border border-white/5">
-                                  <div className="text-[9px] text-textTertiary uppercase mb-1">Horn/Warning</div>
-                                  <div className="text-sm font-bold text-white">{analysis.audioAnalysis.acoustics.hornUsage || "None"}</div>
-                              </div>
-                              <div className="p-3 bg-surfaceHighlight/20 rounded border border-white/5">
-                                  <div className="text-[9px] text-textTertiary uppercase mb-1">Voice/Speech</div>
-                                  <div className="text-sm font-bold text-white truncate">{analysis.audioAnalysis.acoustics.voiceAnalysis || "None"}</div>
-                              </div>
-                          </div>
-                      </div>
-
-                      {/* Audio Events Timeline */}
-                      <div>
-                           <h4 className="text-[10px] font-bold text-textTertiary uppercase mb-3">Detected Audio Events</h4>
-                           <div className="space-y-3">
-                               {(analysis.audioAnalysis.events || []).map((evt, i) => (
-                                   <div key={i} className="flex gap-4 p-3 bg-surface border border-white/5 hover:border-primary/40 rounded-lg group transition-colors cursor-pointer" onClick={() => {
-                                       const match = evt.timestamp.match(/(\d{1,2}):(\d{2})(?:\.(\d+))?/);
-                                       if (match) {
-                                           const sec = parseInt(match[1]) * 60 + parseInt(match[2]) + (match[3] ? parseFloat(`0.${match[3]}`) : 0);
-                                           handleSeek(sec);
-                                       }
-                                   }}>
-                                       <div className="w-12 h-12 rounded-full bg-surfaceHighlight flex items-center justify-center shrink-0 border border-white/5 group-hover:border-primary/50 group-hover:bg-primary/10 transition-colors">
-                                           {evt.type === 'Tire Squeal' ? <Activity size={20} className="text-amber-400"/> : 
-                                            evt.type === 'Impact' ? <Zap size={20} className="text-danger"/> :
-                                            evt.type === 'Horn' ? <Speaker size={20} className="text-primary"/> :
-                                            <Waves size={20} className="text-gray-400"/>}
-                                       </div>
-                                       <div className="flex-1 min-w-0">
-                                           <div className="flex justify-between items-center mb-1">
-                                               <span className="text-xs font-bold text-white">{evt.type}</span>
-                                               <span className="text-[10px] font-mono text-primary bg-primary/10 px-1.5 rounded">{evt.timestamp}</span>
-                                           </div>
-                                           <p className="text-[10px] text-gray-400 leading-relaxed mb-1">{evt.description}</p>
-                                           <div className="text-[9px] text-textTertiary italic">"{evt.significance}"</div>
-                                       </div>
-                                   </div>
-                               ))}
-                               {(!analysis.audioAnalysis.events || analysis.audioAnalysis.events.length === 0) && (
-                                   <div className="text-center py-8 text-xs text-gray-500 italic border border-dashed border-white/10 rounded-lg">
-                                       No significant acoustic events detected.
-                                   </div>
-                               )}
-                           </div>
-                      </div>
-                  </div>
-              )}
-
-              {/* ... (Rest of the tabs: shadows, reflections, synthesis, sim, liability... unchanged) ... */}
-              {activeTab === 'reflections' && analysis?.reflectionAnalysis && (
-                  <div className="space-y-6 animate-fade-in">
-                      {/* Summary Card */}
-                      <div className="bg-surface border border-white/10 rounded-xl p-4 relative overflow-hidden">
-                         <div className="absolute top-0 right-0 p-3 opacity-10 text-primary"><Sparkles size={64}/></div>
-                         <h4 className="text-[10px] font-bold text-textTertiary uppercase mb-2 flex items-center gap-2">
-                            <Sparkles size={12} className="text-primary"/> Indirect Evidence Analysis
-                         </h4>
-                         <p className="text-xs text-gray-300 leading-relaxed italic border-l-2 border-primary/50 pl-3">
-                             "{analysis.reflectionAnalysis.summary}"
-                         </p>
-                      </div>
-                      
-                      {/* Artifacts List */}
-                      <div className="space-y-3">
-                          <h4 className="text-[10px] font-bold text-textTertiary uppercase">Detected Reflection Artifacts</h4>
-                          {(analysis.reflectionAnalysis.artifacts || []).map((artifact, i) => (
-                              <div key={i} className="bg-surfaceHighlight/20 border border-white/5 rounded-lg p-3 hover:bg-surfaceHighlight/40 transition-colors cursor-pointer group" onClick={() => {
-                                  const match = artifact.timestamp.match(/(\d{1,2}):(\d{2})(?:\.(\d+))?/);
-                                  if (match) {
-                                      const sec = parseInt(match[1]) * 60 + parseInt(match[2]) + (match[3] ? parseFloat(`0.${match[3]}`) : 0);
-                                      handleSeek(sec);
-                                  }
-                              }}>
-                                  <div className="flex justify-between items-start mb-2">
-                                      <div className="flex items-center gap-2">
-                                          <div className="w-1.5 h-1.5 rounded-full bg-primary/50 group-hover:bg-primary group-hover:shadow-[0_0_8px_rgba(99,102,241,0.8)] transition-all"></div>
-                                          <span className="text-xs font-bold text-white">{artifact.surface}</span>
-                                      </div>
-                                      <div className="flex gap-2 items-center">
-                                          <span className="text-[10px] font-mono text-primary bg-primary/10 px-1.5 rounded">{artifact.timestamp}</span>
-                                          <ConfidenceBadge level={artifact.significance === 'Critical' ? 'High' : artifact.significance === 'High' ? 'High' : 'Moderate'} />
-                                      </div>
-                                  </div>
-                                  
-                                  <p className="text-[10px] text-gray-400 mb-2 pl-3.5">{artifact.description}</p>
-                                  
-                                  <div className="ml-3.5 bg-primary/5 border border-primary/20 rounded p-2">
-                                      <div className="text-[9px] font-bold text-primary uppercase mb-0.5">Revealed Fact</div>
-                                      <div className="text-[10px] text-gray-300 font-medium">{artifact.revealedInformation}</div>
-                                  </div>
-                              </div>
-                          ))}
-                          
-                          {(!analysis.reflectionAnalysis.artifacts || analysis.reflectionAnalysis.artifacts.length === 0) && (
-                               <div className="text-center py-8 text-xs text-gray-500 italic border border-dashed border-white/10 rounded-lg">
-                                   No reflective surface artifacts detected in this footage.
-                               </div>
-                          )}
-                      </div>
-                  </div>
-              )}
-
-              {/* SHADOW GEOMETRY TAB */}
-              {activeTab === 'shadows' && analysis?.shadowAnalysis && (
-                  <div className="space-y-6 animate-fade-in">
-                      {/* Solar Position Card */}
-                      <div className="bg-surface border border-white/10 rounded-xl p-5 relative overflow-hidden flex flex-col md:flex-row gap-6 items-center">
-                          <div className="absolute top-0 right-0 p-3 opacity-5 text-amber-500"><Sun size={120}/></div>
-                          
-                          {/* Solar Compass Graphic */}
-                          <div className="w-32 h-32 relative shrink-0">
-                              <svg viewBox="0 0 100 100" className="w-full h-full">
-                                  <circle cx="50" cy="50" r="45" fill="none" stroke="#333" strokeWidth="2" />
-                                  <line x1="50" y1="5" x2="50" y2="95" stroke="#333" strokeWidth="1" strokeDasharray="4 4" />
-                                  <line x1="5" y1="50" x2="95" y2="50" stroke="#333" strokeWidth="1" strokeDasharray="4 4" />
-                                  <text x="50" y="15" textAnchor="middle" fill="#666" fontSize="10" fontWeight="bold">N</text>
-                                  {/* Sun Indicator - position would be dynamic in real implementation */}
-                                  <line x1="50" y1="50" x2="80" y2="80" stroke="#f59e0b" strokeWidth="3" strokeLinecap="round" />
-                                  <circle cx="80" cy="80" r="5" fill="#f59e0b" className="animate-pulse" />
-                              </svg>
-                              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                                  <div className="text-[10px] font-mono text-amber-500 bg-surface/80 px-1 rounded">Sun</div>
-                              </div>
-                          </div>
-
-                          <div className="flex-1 space-y-4 w-full">
-                              <div>
-                                  <h4 className="text-[10px] font-bold text-textTertiary uppercase mb-2 flex items-center gap-2">
-                                      <Sun size={12} className="text-amber-500"/> Solar Geometry
-                                  </h4>
-                                  <div className="grid grid-cols-2 gap-3">
-                                      <div className="bg-white/5 rounded p-2 border border-white/5">
-                                          <div className="text-[9px] text-gray-500 uppercase">Azimuth</div>
-                                          <div className="text-xs font-bold text-white">{analysis.shadowAnalysis.lightSource.azimuth}</div>
-                                      </div>
-                                      <div className="bg-white/5 rounded p-2 border border-white/5">
-                                          <div className="text-[9px] text-gray-500 uppercase">Elevation</div>
-                                          <div className="text-xs font-bold text-white">{analysis.shadowAnalysis.lightSource.elevation}</div>
-                                      </div>
-                                  </div>
-                              </div>
-
-                              <div className={`p-3 rounded border ${analysis.shadowAnalysis.timeVerification.discrepancy === 'None' ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-rose-500/10 border-rose-500/30'}`}>
-                                  <div className="flex justify-between items-center mb-1">
-                                      <span className={`text-[9px] font-bold uppercase ${analysis.shadowAnalysis.timeVerification.discrepancy === 'None' ? 'text-emerald-400' : 'text-rose-400'}`}>Timestamp Verification</span>
-                                      <ConfidenceBadge level={analysis.shadowAnalysis.timeVerification.confidence} />
-                                  </div>
-                                  <div className="flex justify-between text-xs text-white">
-                                      <span>Video: <span className="font-mono">{analysis.shadowAnalysis.timeVerification.claimedTime}</span></span>
-                                      <span>Solar: <span className="font-mono">{analysis.shadowAnalysis.timeVerification.calculatedTime}</span></span>
-                                  </div>
-                              </div>
-                          </div>
-                      </div>
-
-                      {/* Shadow Consistency */}
-                      <div>
-                          <div className="flex justify-between items-center mb-3">
-                              <h4 className="text-[10px] font-bold text-textTertiary uppercase">Shadow Consistency Audit</h4>
-                              <span className="text-[9px] font-mono text-primary">{analysis.shadowAnalysis.consistencyScore}/100 Score</span>
-                          </div>
-                          
-                          <div className="space-y-3">
-                              {(analysis.shadowAnalysis.artifacts || []).map((art, i) => (
-                                  <div key={i} className="flex gap-3 items-start p-3 bg-surfaceHighlight/20 rounded border border-white/5">
-                                      <div className={`mt-0.5 w-2 h-2 rounded-full ${art.consistency === 'Consistent' ? 'bg-emerald-500' : 'bg-rose-500'}`}></div>
-                                      <div>
-                                          <div className="text-xs font-bold text-white mb-0.5">{art.object}</div>
-                                          <div className="text-[10px] text-gray-400 mb-1">Length: {art.shadowLength}</div>
-                                          <div className="text-[10px] text-gray-500 italic">"{art.implication}"</div>
-                                      </div>
-                                  </div>
-                              ))}
-                          </div>
-                          <p className="mt-4 text-[10px] text-gray-500 border-t border-white/5 pt-2">
-                              Note: {analysis.shadowAnalysis.notes}
-                          </p>
-                      </div>
-                  </div>
-              )}
-              
-              {/* SYNTHESIS TAB */}
-              {activeTab === 'synthesis' && analysis?.multiView && (
-                  <div className="space-y-6 animate-fade-in">
-                      {/* Sync Status Card */}
-                      <div className="bg-surface border border-white/10 rounded-xl p-4 relative overflow-hidden">
-                          <div className="absolute top-0 right-0 p-2 opacity-10"><Layers size={48}/></div>
-                          <h4 className="text-[10px] font-bold text-textTertiary uppercase mb-2 flex items-center gap-2">
-                              <CheckCircle2 size={12} className="text-emerald-400"/> Temporal Synchronization
-                          </h4>
-                          <p className="text-xs text-gray-300 leading-relaxed italic border-l-2 border-primary/50 pl-3">
-                              "{analysis.multiView.synchronizationNotes}"
-                          </p>
-                      </div>
-
-                      {/* Source Reliability */}
-                      <div className="space-y-3">
-                           <h4 className="text-[10px] font-bold text-textTertiary uppercase">Source Integrity Analysis</h4>
-                           {(analysis.multiView.sourceAnalysis || []).map((src, i) => (
-                               <div key={i} className="bg-surfaceHighlight/20 border border-white/5 rounded-lg p-3 hover:bg-surfaceHighlight/40 transition-colors">
-                                   <div className="flex justify-between items-start mb-2">
-                                       <span className="text-xs font-bold text-white">{src.sourceLabel}</span>
-                                       <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ${src.reliabilityScore === 'High' ? 'text-emerald-400 bg-emerald-400/10' : 'text-amber-400 bg-amber-400/10'}`}>{src.reliabilityScore} Rel.</span>
-                                   </div>
-                                   <div className="grid grid-cols-2 gap-2 text-[10px] text-textSecondary mb-2">
-                                       <div><span className="text-textTertiary">Coverage:</span> {src.coverageArea}</div>
-                                   </div>
-                                   <p className="text-[10px] text-gray-400 border-t border-white/5 pt-2 mt-1">{src.notes}</p>
-                               </div>
-                           ))}
-                      </div>
-
-                      {/* Unified Timeline */}
-                      <div>
-                           <h4 className="text-[10px] font-bold text-textTertiary uppercase mb-3">Unified Cross-Source Timeline</h4>
-                           <div className="space-y-4 pl-2 border-l border-white/10">
-                               {(analysis.multiView.unifiedTimeline || []).map((evt, i) => (
-                                   <div key={i} className="relative pl-4">
-                                       <div className="absolute -left-[5px] top-1.5 w-2.5 h-2.5 rounded-full bg-surface border border-primary/50"></div>
-                                       <div className="text-xs font-bold text-primary mb-0.5">{evt.timestamp}</div>
-                                       <div className="text-xs text-white mb-2">{evt.description}</div>
-                                       
-                                       <div className="flex gap-2">
-                                          <div className="px-2 py-1 bg-white/5 rounded border border-white/5 text-[9px] text-gray-400 flex items-center gap-1.5">
-                                              <MonitorPlay size={10} className="text-primary"/> 
-                                              <span className="text-textTertiary uppercase">Best View:</span> {evt.bestViewSource}
-                                          </div>
-                                       </div>
-                                   </div>
-                               ))}
-                           </div>
-                      </div>
-                  </div>
-              )}
-
-              {/* SIM & LIABILITY TABS */}
-              {activeTab === 'sim' && (
-                  <div className="flex flex-col h-full">
-                      {/* ... (Existing Sim Content) ... */}
-                      <div className="bg-surface border border-white/10 rounded-lg p-1 flex gap-2 mb-6">
-                          <input 
-                            value={customQuery} onChange={(e) => setCustomQuery(e.target.value)} 
-                            placeholder="Type a 'What If' scenario..." 
-                            className="flex-1 bg-transparent px-3 py-2 text-xs text-white focus:outline-none placeholder-textTertiary" 
-                          />
-                          <button 
-                            onClick={() => {setIsSimulating(true); evaluateCounterfactual(analysis?.rawAnalysis||"", customQuery).then(r => {setSimResult(r); setIsSimulating(false)})}} 
-                            disabled={isSimulating}
-                            className="px-3 bg-primary/20 text-primary rounded hover:bg-primary/30 disabled:opacity-50"
-                          >
-                             {isSimulating ? <Loader2 size={14} className="animate-spin"/> : <GitPullRequest size={14}/>}
-                          </button>
-                      </div>
-                      
-                      {simResult && <div className="p-4 bg-primary/5 border-l-2 border-primary text-xs text-textSecondary leading-relaxed mb-6 animate-fade-in"><TextWithTimestamps text={simResult} onSeek={handleSeek} /></div>}
-                      
-                      <div className="space-y-3">
-                          <h4 className="text-[10px] font-bold text-textTertiary uppercase mb-1">Generated Counterfactuals</h4>
-                          {(analysis?.counterfactuals || []).map((cf, i) => (
-                              <div key={i} onClick={() => setCustomQuery(cf.question)} className="p-4 border border-white/5 hover:border-primary/30 rounded-lg bg-surface cursor-pointer transition-all group">
-                                  <div className="text-xs font-bold text-white mb-1.5 group-hover:text-primary transition-colors">{cf.question}</div>
-                                  <div className="text-[10px] text-textSecondary flex justify-between">
-                                      <span>Outcome: {cf.outcome}</span>
-                                      <span className="text-textTertiary">High Prob.</span>
-                                  </div>
-                              </div>
-                          ))}
-                      </div>
-                  </div>
-              )}
-
-              {activeTab === 'liability' && (
-                  <div className="flex flex-col h-full space-y-8">
-                      {/* Section 1: Fault Breakdown */}
-                      <div className="space-y-6">
-                           <div className="bg-surface border border-white/5 rounded-xl p-6 flex flex-col items-center shadow-panel relative overflow-hidden">
-                                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-primary to-accent opacity-50"></div>
-                                <h4 className="text-[10px] font-bold text-textTertiary uppercase tracking-widest mb-4">Liability Allocation Model</h4>
-                                <div className="h-48 w-full">
-                                    <FaultChart allocations={analysis?.fault.allocations || []} />
-                                </div>
-                                <p className="text-xs text-center text-gray-400 mt-4 italic max-w-sm">
-                                    {analysis?.fault.summary}
-                                </p>
-                           </div>
-
-                           {/* Detailed Allocations */}
-                           {(analysis?.fault.allocations || []).map((alloc, i) => (
-                                <div key={i} className="bg-surface border border-white/5 rounded-xl overflow-hidden animate-fade-in" style={{animationDelay: `${i*100}ms`}}>
-                                    <div className="p-4 border-b border-white/5 flex justify-between items-center bg-[#121216]">
-                                        <div className="flex items-center gap-3">
-                                            <div className="text-2xl font-mono font-bold text-white tracking-tighter">{alloc.percentage}%</div>
-                                            <div>
-                                                <div className="text-sm font-bold text-white">{alloc.party}</div>
-                                                <ConfidenceBadge level={alloc.confidence} />
-                                            </div>
-                                        </div>
-                                    </div>
-                                    
-                                    <div className="p-4 space-y-5">
-                                        {/* Violations */}
-                                        {(alloc.violations || []).length > 0 && (
-                                            <div className="space-y-2">
-                                                <h5 className="text-[9px] font-bold text-textTertiary uppercase flex items-center gap-1.5 tracking-wider">
-                                                    <AlertOctagon size={10} className="text-rose-500" /> Detected Violations
-                                                </h5>
-                                                {(alloc.violations || []).map((v, k) => (
-                                                    <div key={k} className="bg-rose-500/5 border border-rose-500/20 rounded-md p-2.5 transition-all hover:bg-rose-500/10">
-                                                        <div className="flex justify-between mb-1">
-                                                            <span className="text-xs font-bold text-rose-300">{v.rule}</span>
-                                                            <span className={`text-[8px] px-1.5 py-0.5 rounded uppercase font-bold tracking-wider ${v.severity === 'Critical' ? 'bg-rose-500 text-white' : 'bg-rose-500/20 text-rose-400'}`}>{v.severity}</span>
-                                                        </div>
-                                                        <div className="text-[10px] text-rose-200/70 leading-relaxed">
-                                                            <TextWithTimestamps text={v.description + " " + v.timestamp} onSeek={handleSeek} />
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        )}
-
-                                        {/* Reasoning */}
-                                        <div>
-                                            <h5 className="text-[9px] font-bold text-textTertiary uppercase mb-1.5 tracking-wider flex items-center gap-1.5">
-                                                <Layers size={10} className="text-primary"/> Forensic Logic
-                                            </h5>
-                                            <div className="p-3 bg-surfaceHighlight/30 rounded-lg border border-white/5">
-                                                <p className="text-xs text-gray-300 leading-relaxed">
-                                                    <TextWithTimestamps text={alloc.reasoning} onSeek={handleSeek} />
-                                                </p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                           ))}
-                      </div>
-
-                      {/* Section 2: Legal Research (Existing) */}
-                      <div className="pt-8 border-t border-white/5">
-                          <h4 className="text-[10px] font-bold text-textTertiary uppercase mb-4 flex items-center gap-2">
-                              <Search size={12}/> Legal Reference Search
-                          </h4>
-                          <div className="bg-surface border border-white/10 rounded-lg p-1 flex gap-2 mb-4">
-                              <input 
-                                value={legalQuery} onChange={(e) => setLegalQuery(e.target.value)} 
-                                placeholder="Search case law & statutes..." 
-                                className="flex-1 bg-transparent px-3 py-2 text-xs text-white focus:outline-none placeholder-textTertiary" 
-                              />
-                              <button 
-                                onClick={() => {setIsSearching(true); searchSimilarCases(legalQuery).then(r => {setLegalResult(r); setIsSearching(false)})}} 
-                                disabled={isSearching}
-                                className="px-3 bg-primary/20 text-primary rounded hover:bg-primary/30 disabled:opacity-50"
-                              >
-                                 {isSearching ? <Loader2 size={14} className="animate-spin"/> : <Search size={14}/>}
-                              </button>
-                          </div>
-                          {legalResult && (
-                              <div className="space-y-4 animate-fade-in">
-                                  <div className="text-xs text-textSecondary leading-relaxed bg-surface p-4 rounded-lg border border-white/5"><TextWithTimestamps text={legalResult.text} onSeek={handleSeek} /></div>
-                                  <div className="space-y-2">
-                                      <h4 className="text-[9px] font-bold text-textTertiary uppercase mb-1">Citations & Precedents</h4>
-                                      {(legalResult.chunks || []).map((c, i) => c.web?.uri && (
-                                          <a key={i} href={c.web.uri} target="_blank" className="block p-3 bg-surface border border-white/5 hover:border-primary/40 rounded-lg transition-colors group">
-                                              <div className="text-[10px] font-bold text-primary mb-0.5 truncate group-hover:underline">{c.web.title}</div>
-                                              <div className="text-[9px] text-textTertiary truncate font-mono">{c.web.uri}</div>
-                                          </a>
-                                      ))}
-                                  </div>
-                              </div>
-                          )}
-                      </div>
-                  </div>
-              )}
-          </div>
-
-          {/* Footer Actions */}
-          <div className="p-4 border-t border-white/5 bg-[#0c0c10]">
-              <div className="grid grid-cols-2 gap-2 mb-2">
-                  <button 
-                    onClick={() => handleExport('Executive Summary')}
-                    disabled={!analysis || generatingReport === 'Executive Summary'}
-                    className="flex items-center justify-center py-2 bg-surface hover:bg-surfaceHighlight border border-white/10 hover:border-white/20 rounded text-[9px] font-bold text-textSecondary hover:text-white transition-all shadow-sm disabled:opacity-50"
-                  >
-                      {generatingReport === 'Executive Summary' ? <Loader2 size={12} className="animate-spin mr-1.5"/> : <FileText size={12} className="mr-1.5" />} Executive
-                  </button>
-                  <button 
-                    onClick={() => handleExport('Technical Report')}
-                    disabled={!analysis || generatingReport === 'Technical Report'}
-                    className="flex items-center justify-center py-2 bg-surface hover:bg-surfaceHighlight border border-white/10 hover:border-white/20 rounded text-[9px] font-bold text-textSecondary hover:text-white transition-all shadow-sm disabled:opacity-50"
-                  >
-                      {generatingReport === 'Technical Report' ? <Loader2 size={12} className="animate-spin mr-1.5"/> : <Activity size={12} className="mr-1.5" />} Technical
-                  </button>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                  <button 
-                    onClick={() => handleExport('Insurance Claim')}
-                    disabled={!analysis || generatingReport === 'Insurance Claim'}
-                    className="flex items-center justify-center py-2 bg-surface hover:bg-surfaceHighlight border border-white/10 hover:border-white/20 rounded text-[9px] font-bold text-textSecondary hover:text-white transition-all shadow-sm disabled:opacity-50"
-                  >
-                      {generatingReport === 'Insurance Claim' ? <Loader2 size={12} className="animate-spin mr-1.5"/> : <ShieldCheck size={12} className="mr-1.5" />} Insurance
-                  </button>
-                  <button 
-                    onClick={() => handleExport('Legal Brief')}
-                    disabled={!analysis || generatingReport === 'Legal Brief'}
-                    className="flex items-center justify-center py-2 bg-surface hover:bg-surfaceHighlight border border-white/10 hover:border-white/20 rounded text-[9px] font-bold text-textSecondary hover:text-white transition-all shadow-sm disabled:opacity-50"
-                  >
-                      {generatingReport === 'Legal Brief' ? <Loader2 size={12} className="animate-spin mr-1.5"/> : <Scale size={12} className="mr-1.5" />} Legal Brief
-                  </button>
-              </div>
           </div>
       </div>
-
     </div>
   );
 };
