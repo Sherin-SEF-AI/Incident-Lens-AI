@@ -48,7 +48,6 @@ Unlike standard video players, Incident Lens AI "reasons" about the footage in r
     *   *Legal Brief* (Litigators)
 
 ---
-
 ## 💎 Gemini 3 Integration
 
 This project showcases the cutting-edge capabilities of the **Gemini 3 Pro** model via the `@google/genai` SDK:
