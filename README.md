@@ -21,7 +21,6 @@ https://youtu.be/QUVeahUrCTg?si=0KiQewMFjjllYqv4
 Incident Lens AI is a production-grade application designed for insurance carriers, legal defense teams, and fleet safety managers. It leverages the multimodal capabilities of **Google Gemini 3 Pro** to transform unstructured video evidence (dashcam, CCTV, bodycam) into legally admissible forensic reconstructions.
 
 Unlike standard video players, Incident Lens AI "reasons" about the footage in real-time, calculating vehicle speeds, inferring traffic signal states from indirect visual cues, and citing specific legal statutes for fault determination.
-
 ---
 
 ## 🚀 Key Features
